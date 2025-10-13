@@ -1,0 +1,8 @@
+torch
+torchdiffeq
+numpy
+matplotlib
+pandas
+scikit-learn
+seaborn
+tensorboard

@@ -550,20 +550,29 @@ def extract_pccp_tac(file_path = "/Users/benjaminmaurel/Downloads/mr4_tls_pccp.c
 
     return data_dict, [max_out, best_lambda]
 
-# def extract_gen_tac(file_path = "virtual_cohort.csv", plot = True):
-def extract_gen_tac(file_path = ["virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = False, exp = None):
-# def extract_gen_tac(file_path = ["exp_run_all/26126/virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = False, exp = None):
+def extract_gen_tac(train_data_path, test_data_path=None, plot=False):
+    """
+    Extracts and processes Tacrolimus data from given CSV files.
+
+    Args:
+        train_data_path (str): The full path to the training data CSV file.
+        test_data_path (str, optional): The full path to the test data CSV file.
+        plot (bool): If True, generates and displays a plot of the data.
+
+    Returns:
+        tuple: A tuple containing the processed data dictionary and a list [max_out, best_lambda].
+    """
     data_dict = {}
-    if exp:
-        file_path[0] = f"exp_run_all/{exp}/virtual_cohort_train.csv"
-        try:
-            file_path[1] = f"exp_run_all/{exp}/virtual_cohort_test.csv"
-        except:
-            pass
-    # df = pd.read_csv(file_path, sep=",")
-    df1 = pd.read_csv(file_path[0], sep=",")
-    df2 = pd.read_csv(file_path[1], sep=",")
-    df = pd.concat([df1, df2])
+
+    # Load training data
+    df1 = pd.read_csv(train_data_path, sep=",")
+
+    # Load test data if provided
+    if test_data_path and os.path.exists(test_data_path):
+        df2 = pd.read_csv(test_data_path, sep=",")
+        df = pd.concat([df1, df2])
+    else:
+        df = df1
 
     # df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
     # df = df.apply(pd.to_numeric, errors='coerce')

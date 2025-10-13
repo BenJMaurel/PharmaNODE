@@ -114,7 +114,14 @@ if __name__ == '__main__':
 		experimentID = int(args.experiment)
 		if experimentID is None:
 			experimentID = int(SystemRandom().random()*100000)
-	ckpt_path = os.path.join(args.save, "experiment_" + str(experimentID) + '.ckpt')
+
+	# Set up the base directory for saving results
+	base_save_path = args.save
+	utils.makedirs(base_save_path)
+
+	# Path for the checkpoint file
+	ckpt_path = os.path.join(base_save_path, "experiment_" + str(experimentID) + '.ckpt')
+
 
 	start = time.time()
 	print("Sampling dataset of {} training examples".format(args.n))
@@ -125,7 +132,7 @@ if __name__ == '__main__':
 		input_command = input_command[:ind] + input_command[(ind+2):]
 	input_command = " ".join(input_command)
 
-	utils.makedirs("results/")
+	# utils.makedirs("results/")
 
 	##################################################################
 	data_obj = parse_datasets(args, device)
@@ -248,9 +255,11 @@ if __name__ == '__main__':
 	##################################################################
 	# Training
 
-	log_path = "logs/" + file_name + "_" + str(experimentID) + ".log"
-	if not os.path.exists("logs/"):
-		utils.makedirs("logs/")
+	log_dir = os.path.join(base_save_path, "logs")
+	utils.makedirs(log_dir)
+	log_path = os.path.join(log_dir, file_name + "_" + str(experimentID) + ".log")
+
+
 	logger = utils.get_logger(logpath=log_path, filepath=os.path.abspath(__file__))
 	logger.info(input_command)
 
@@ -258,7 +267,7 @@ if __name__ == '__main__':
 
 	num_batches = data_obj["n_train_batches"]
 	
-	tensorboard_log_dir = os.path.join(args.save, "runs", str(experimentID))
+	tensorboard_log_dir = os.path.join(base_save_path, "runs", str(experimentID))
 	writer = SummaryWriter(tensorboard_log_dir)
 	print(f"TensorBoard logs will be saved to: {tensorboard_log_dir}")
 
