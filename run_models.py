@@ -94,6 +94,15 @@ parser.add_argument('--experiment', type = str, default = None, help="Fix experi
 parser.add_argument('--patience', type=int, default=10000, help='Patience for early stopping')
 parser.add_argument('--smoothing_factor', type=float, default=0.01, help='Smoothing factor for EMA of test MSE')
 
+parser.add_argument('--train_datasets', type=str, default='pccp', help='Datasets to use for training, separated by commas')
+parser.add_argument('--test_datasets', type=str, default='pccp', help='Datasets to use for testing, separated by commas')
+parser.add_argument('--train_data_path', type=str, help='Path to the training data file')
+parser.add_argument('--test_data_path', type=str, help='Path to the testing data file')
+parser.add_argument('--pharmac_path', type=str, help='Path to the pharmacokinetics data file')
+parser.add_argument('--auc_path', type=str, help='Path to the AUC data file')
+parser.add_argument('--exp', type=str, default="", help='Experiment ID for gen_tac')
+
+
 args = parser.parse_args()
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
