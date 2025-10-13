@@ -25,24 +25,24 @@ parser$add_argument("--output_dir", type = "character", default = ".",
                     help = "Directory to save the output PDF and CSV files [default: current directory]")
 parser$add_argument("--cores", type = "integer", default = 1,
                     help = "Number of CPU cores to use for parallel processing [default: 1]")
-parser$add_argument("--experiment", type = "character", default = ".",
-                    help = "Directory to save the output PDF and CSV files [default: current directory]")
+parser$add_argument("--monolix_path", type = "character", required = TRUE,
+                    help = "Path to the Monolix installation directory")
+parser$add_argument("--model_file", type = "character", required = TRUE,
+                    help = "Path to the Monolix model file (e.g., model.txt)")
 args <- parser$parse_args()
 
-args <- parser$parse_args()
-message("Defining the tacrolimus pharmacokinetic model...")
-initializeLixoftConnectors(software = 'monolix', path = "/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite")
-# 3. Define the path to your Monolix project file
-# model_file_path   <- "~/model_tacro.txt"
-model_file_path   <- "/Users/benjaminmaurel/test_model.txt"
+# --- Initialize Lixoft Connectors ---
+message("Initializing Lixoft Connectors...")
+initializeLixoftConnectors(software = 'monolix', path = args$monolix_path)
 
-data_file_path    <- file.path("~/Documents/Training_Sanofi/notebooks_hands_on/latent_ode/exp_run_all", file.path(args$experiment, paste0("virtual_cohort_train.csv")))
-project_save_path <- file.path(args$output_dir, paste0("2_test_tacro.mlxtran"))
-# 4. Create the project
-project_path <- "~/2_test_tacro.mlxtran"
+# --- Construct Paths ---
+data_file_path    <- file.path(args$virtual_cohort)
+project_save_path <- file.path(args$output_dir, "tacro_monolix_project.mlxtran")
+model_file_path   <- args$model_file
 
-# Load the completed Monolix project
-# loadProject(project_path)
+message(paste("Data file:", data_file_path))
+message(paste("Model file:", model_file_path))
+message(paste("Project will be saved to:", project_save_path))
 column_mapping <- c(
   ID          = "id",         # Subject Identifier
   TIME        = "time",       # Time of measurement or dose

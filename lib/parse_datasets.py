@@ -183,20 +183,26 @@ def parse_datasets(args, device):
 			
 			for name in datasets_to_load:
 				if name in available_datasets:
-					# Get the correct function from the map
 					extract_function = available_datasets[name]
-					# Call the function and get the results
-					data_dict, max_out_value = extract_function(plot=False, exp = args.experiment)
+
+					# Construct file paths dynamically
+					train_path = os.path.join(args.save, "data", "virtual_cohort_train.csv")
+					test_path = os.path.join(args.save, "data", "virtual_cohort_test.csv")
+
+					# Call the function with the new signature
+					data_dict, max_out_value = extract_function(train_data_path=train_path, test_data_path=test_path, plot=False)
+
 					if name not in datasets_to_load_train:
 						dict_list.append(data_dict)
-					dataset_obj.update(data_dict) # Merge dictionaries
+					dataset_obj.update(data_dict)
 					max_out_list.append(max_out_value)
+
 				if name in datasets_to_load_train:
-					# Get the correct function from the map
+					# This block might be redundant if logic is the same as above
 					extract_function = available_datasets[name]
-					# Call the function and get the results
-					data_dict, max_out_value = extract_function(plot=False, exp = args.experiment)
-					# Collect the results
+					train_path = os.path.join(args.save, "data", "virtual_cohort_train.csv")
+					test_path = os.path.join(args.save, "data", "virtual_cohort_test.csv")
+					data_dict, max_out_value = extract_function(train_data_path=train_path, test_data_path=test_path, plot=False)
 					dict_list_train.append(data_dict)
 					max_out_list_train.append(max_out_value)
 		elif dataset_name == 'Theo':
@@ -277,10 +283,10 @@ def parse_datasets(args, device):
 				test_keys = test_keys_2
 			# max_out = np.array(max_out_list)
 		print('##############', test_keys)
-		ids_df = pd.DataFrame({'ID': test_keys})
-		# Save the DataFrame to a CSV file.
-		# The index=False part is important to avoid an extra unnamed column.
-		ids_df.to_csv('/Users/benjaminmaurel/Downloads/ids_to_keep.csv', index=False)
+		# ids_df = pd.DataFrame({'ID': test_keys})
+		# # Save the DataFrame to a CSV file.
+		# # The index=False part is important to avoid an extra unnamed column.
+		# ids_df.to_csv('/Users/benjaminmaurel/Downloads/ids_to_keep.csv', index=False)
 
 		dataset_train = TacroDataset({k: dataset_obj[k] for k in train_keys})
 		dataset_test = TacroDataset({k: dataset_obj[k] for k in test_keys})

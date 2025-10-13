@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 import argparse
 import torch.distributions as dist
 import seaborn as sns
+import os
 
 
 
@@ -534,49 +535,45 @@ def generate_virtual_cohort(num_patients=10):
 
 
 if __name__ == '__main__':
-    # Define the number of patients for the virtual cohort
     parser = argparse.ArgumentParser('Generation Tacro')
-    parser.add_argument('--exp', type=str, default='exp_all_run/', help="Path for save experiment")
     parser.add_argument('--num_patients', type=int, default=1000, help="Number of virtual patients to generate")
-    parser.add_argument('--first_at', type=int, default=0, help="Do you want to generate test set also?")
+    parser.add_argument('--output-dir', type=str, default='data/tacro', help="Directory to save the generated data")
+    parser.add_argument('--first_at', type=int, default=0, help="Generate test set (1: train+test, 2: test only)")
     args = parser.parse_args()
-    NUM_VIRTUAL_PATIENTS = args.num_patients
-    
+
+    # Ensure the output directory exists
+    os.makedirs(args.output_dir, exist_ok=True)
+
     # Generate the dataset
-    cohort_df = generate_virtual_cohort(num_patients=NUM_VIRTUAL_PATIENTS)
-    
-    
-    # Save the dataset to a CSV file
-    # 1. Get a list of all unique IDs
+    cohort_df = generate_virtual_cohort(num_patients=args.num_patients)
+
+    # Get a list of all unique IDs
     unique_ids = cohort_df['ID'].unique()
 
-    # 2. Split the unique IDs into training (80%) and testing (20%) sets
-    # random_state ensures the split is the same every time you run the code
+    # Split IDs into training and testing sets
     if args.first_at == 1:
         train_ids, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
     elif args.first_at == 2:
-        _, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
+        train_ids, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
     else:
-        # train_ids, test_ids = train_test_split(unique_ids, test_size=0.0, shuffle=False)
         train_ids = unique_ids
+        test_ids = []
 
-    # 3. Filter the original DataFrame to create train and test sets
-    if args.first_at <= 1:
+    # Create and save train_df
+    if train_ids is not None and len(train_ids) > 0:
         train_df = cohort_df[cohort_df['ID'].isin(train_ids)]
-        train_df.to_csv('virtual_cohort_train.csv', index=False)
-    if args.first_at >= 1:
+        train_csv_path = os.path.join(args.output_dir, 'virtual_cohort_train.csv')
+        train_df.to_csv(train_csv_path, index=False)
+        print(f"Training data saved to {train_csv_path}")
+
+    # Create and save test_df
+    if test_ids is not None and len(test_ids) > 0:
         test_df = cohort_df[cohort_df['ID'].isin(test_ids)]
-        test_df.to_csv('virtual_cohort_test.csv', index=False)
-    # 4. Save the two new DataFrames to separate .csv files
-    try:
-        if args.first_at <= 1:
-            train_df.to_csv(f'exp_run_all/{args.exp}/virtual_cohort_train.csv', index=False)
-        if args.first_at >= 1:
-            test_df.to_csv(f'exp_run_all/{args.exp}/virtual_cohort_test.csv', index=False)
-    except:
-        pass
-    print(f"\nSuccessfully created virtual cohort with {NUM_VIRTUAL_PATIENTS} patients.")
-    print(f"Data saved to virtual_cohort_train")
+        test_csv_path = os.path.join(args.output_dir, 'virtual_cohort_test.csv')
+        test_df.to_csv(test_csv_path, index=False)
+        print(f"Test data saved to {test_csv_path}")
+
+    print(f"\nSuccessfully created virtual cohort with {args.num_patients} patients.")
     
     # Display the first few rows of the generated file
     print("\n--- File Head ---")

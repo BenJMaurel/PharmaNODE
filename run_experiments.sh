@@ -4,6 +4,25 @@
 START_SEED=50
 END_SEED=60 # Run for seeds from 1 to 10
 
+# --- Path Configuration ---
+# Default values
+DEFAULT_LOG_DIR="logs"
+DEFAULT_OUTPUT_FILE="test_results_141_bis.txt"
+
+# Parse command-line arguments
+LOG_DIR="$DEFAULT_LOG_DIR"
+ALL_TEST_RESULTS_FILE="$DEFAULT_OUTPUT_FILE"
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --output-file) ALL_TEST_RESULTS_FILE="$2"; shift ;;
+        --log-dir) LOG_DIR="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+
 # Define your Python script names
 PYTHON_SCRIPT_TRAIN="run_models.py"
 PYTHON_SCRIPT_TEST="test_model.py"
@@ -13,7 +32,6 @@ PYTHON_SCRIPT_ANALYZE="analyse_std.py" # New script for analysis
 BASE_COMMAND_TRAIN="python3 $PYTHON_SCRIPT_TRAIN --niters 5000 -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5."
 BASE_COMMAND_TEST="$PYTHON_SCRIPT_TEST -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5."
 # Create a file to store all test results for later analysis
-ALL_TEST_RESULTS_FILE="test_results_141_bis.txt"
 > "$ALL_TEST_RESULTS_FILE" # Clear the file if it already exists
 
 echo "Starting multiple experiment runs and collecting test results..."
@@ -32,8 +50,8 @@ do
     # It's generally better to run training sequentially if it's resource-intensive
     # or if you want to ensure a model finishes training before testing it.
     # We redirect training output to its own log file.
-    LOG_FILE_TRAIN="logs/train_${PYTHON_SCRIPT_TRAIN%.py}_${EXPERIMENT_ID}.log"
-    mkdir -p logs # Ensure logs directory exists
+    LOG_FILE_TRAIN="$LOG_DIR/train_${PYTHON_SCRIPT_TRAIN%.py}_${EXPERIMENT_ID}.log"
+    mkdir -p "$LOG_DIR" # Ensure logs directory exists
     $FULL_COMMAND_TRAIN > "$LOG_FILE_TRAIN" 2>&1
     TRAIN_EXIT_CODE=$?
 
@@ -73,4 +91,4 @@ python3 "$PYTHON_SCRIPT_ANALYZE" "$ALL_TEST_RESULTS_FILE"
 
 echo "----------------------------------------------------"
 echo "Analysis complete. Check the output above and in the logs directory."
-echo "To monitor progress, you can use 'tail -f logs/train_run_models_*.log' or 'tensorboard --logdir experiments/runs'"
+echo "To monitor progress, you can use 'tail -f $LOG_DIR/train_run_models_*.log' or 'tensorboard --logdir experiments/runs'"
