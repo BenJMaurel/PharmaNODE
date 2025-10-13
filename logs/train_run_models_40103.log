@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/benjaminmaurel/Documents/Training_Sanofi/notebooks_hands_on/latent_ode/run_models.py", line 14, in <module>
-    from torch.utils.tensorboard import SummaryWriter
-  File "/opt/miniconda3/envs/NODE_test/lib/python3.12/site-packages/torch/__init__.py", line 367, in <module>
-    from torch._C import *  # noqa: F403
-    ^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap>", line 463, in _lock_unlock_module
-KeyboardInterrupt

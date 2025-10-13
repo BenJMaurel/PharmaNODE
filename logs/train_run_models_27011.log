@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/benjaminmaurel/Documents/Training_Sanofi/notebooks_hands_on/latent_ode/run_models.py", line 30, in <module>
-    from lib.plotting import *
-  File "/Users/benjaminmaurel/Documents/Training_Sanofi/notebooks_hands_on/latent_ode/lib/plotting.py", line 29, in <module>
-    from .read_tacro import auc_linuplogdown
-  File "/Users/benjaminmaurel/Documents/Training_Sanofi/notebooks_hands_on/latent_ode/lib/read_tacro.py", line 680, in <module>
-    import chardet
-ModuleNotFoundError: No module named 'chardet'
