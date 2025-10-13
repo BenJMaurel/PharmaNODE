@@ -171,11 +171,9 @@ class Encoder_z0_ODE_RNN(nn.Module):
 	# For every y_i we have two versions: encoded from data and derived from ODE by running it backwards from t_i+1 to t_i
 	# Compute a weighted sum of y_i from data and y_i from ode. Use weighted y_i as an initial value for ODE runing from t_i to t_i-1
 	# Continue until we get to z0
-	def __init__(self, latent_dim, input_dim, z0_diffeq_solver = None, 
-		z0_dim = None, GRU_update = None, mask = False,
-		n_gru_units = 100, 
-		device = torch.device("cpu")):
-		
+	def __init__(self, latent_dim, input_dim, z0_diffeq_solver=None,
+			 z0_dim=None, GRU_update=None, n_static_features=0,
+			 n_gru_units=100, device=torch.device("cpu")):
 		super(Encoder_z0_ODE_RNN, self).__init__()
 
 		if z0_dim is None:
@@ -184,11 +182,10 @@ class Encoder_z0_ODE_RNN(nn.Module):
 			self.z0_dim = z0_dim
 
 		if GRU_update is None:
-			self.GRU_update = GRU_unit(latent_dim, input_dim, 
-				n_units = n_gru_units, 
-				device=device).to(device)
-
-		else:	
+			self.GRU_update = GRU_unit(latent_dim, input_dim,
+									   n_units=n_gru_units,
+									   device=device).to(device)
+		else:
 			self.GRU_update = GRU_update
 
 		self.z0_diffeq_solver = z0_diffeq_solver
@@ -196,21 +193,21 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		self.input_dim = input_dim
 		self.device = device
 		self.extra_info = None
-		self.mask = mask
-		self.static_encoder = nn.Sequential(
-            nn.Linear(3, 64),
-            nn.Tanh(),
-            nn.Linear(64, self.latent_dim)
-        )
-		# self.static_encoder = nn.Sequential(
-        #     nn.Linear(6, 64),
-        #     nn.Tanh(),
-        #     nn.Linear(64, self.latent_dim)
-        # )
+		self.n_static_features = n_static_features
+
+		if self.n_static_features > 0:
+			self.static_encoder = nn.Sequential(
+				nn.Linear(self.n_static_features, 64),
+				nn.Tanh(),
+				nn.Linear(64, self.latent_dim)
+			)
+			utils.init_network_weights(self.static_encoder)
+
 		self.transform_z0 = nn.Sequential(
-		   nn.Linear(latent_dim * 2, 100),
-		   nn.Tanh(),
-		   nn.Linear(100, self.z0_dim * 2),)
+			nn.Linear(latent_dim * 2, 100),
+			nn.Tanh(),
+			nn.Linear(100, self.z0_dim * 2),
+		)
 		utils.init_network_weights(self.transform_z0)
 
 
@@ -255,14 +252,14 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		if run_backwards:
 			t0 = time_steps[0]
 		device = get_device(data)
-		if static == None:
-			prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
-		else:
-			# prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
-			prev_y = self.static_encoder(static).unsqueeze(0)
+
+		prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 		prev_std = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 
-		prev_t, t_i = time_steps[-1] + 0.01,  time_steps[-1]
+		if static is not None and self.n_static_features > 0:
+			prev_y = self.static_encoder(static).unsqueeze(0)
+
+		prev_t, t_i = time_steps[-1] + 0.01, time_steps[-1]
 
 		interval_length = time_steps[-1] - time_steps[0]
 		minimum_step = interval_length / 50

@@ -58,6 +58,16 @@ install.packages(c("argparse", "tidyverse", "mrgsolve", "mapbayr", "MESS", "lixo
 
 A working installation of Monolix is required to run the comparative pharmacometric models. You can find installation instructions on the [Lixoft website](https://lixoft.com/products/monolix-suite/).
 
+### Guix
+
+For a reproducible development environment, you can use Guix. Install the required dependencies by running the following command:
+
+```bash
+guix shell -m guix.scm
+```
+
+This will create a shell with all the necessary Python and R packages.
+
 ## Data Requirements
 
 The models consume data from CSV files, which should be structured to be compatible with the `extract_gen_tac` function in `lib/read_tacro.py`. The input data is expected to have the following columns:

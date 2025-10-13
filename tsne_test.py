@@ -6,7 +6,7 @@
 import os
 import sys
 import matplotlib
-matplotlib.use('Agg') # Use the non-interactive 'Agg' backend
+matplotlib.use('Agg')
 import matplotlib.pyplot
 import matplotlib.pyplot as plt
 import itertools

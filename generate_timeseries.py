@@ -11,7 +11,7 @@ import matplotlib
 if os.path.exists("/Users/yulia"):
 	matplotlib.use('TkAgg')
 else:
-	matplotlib.use('TkAgg')
+	matplotlib.use('Agg')
 
 import numpy as np
 import numpy.random as npr
