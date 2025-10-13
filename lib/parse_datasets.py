@@ -154,59 +154,15 @@ def parse_datasets(args, device):
 	##################################################################
 	# PK Tacro dataset
 	if dataset_name == 'PK_Tacro' or dataset_name == 'PK_MMF' or dataset_name == 'Theo':
-		train = True
-		# train = False
-		test = 1- train
 		if dataset_name == 'PK_Tacro':
-			# data_dict_1, max_out_1 = create_dataset("/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/Adv_dev_2.csv", "/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/adv_foie_p2_JD.csv")
-			# data_dict_2, max_out_2 = create_dataset("/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/Adv_dev_3.csv", "/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/adv_foie_p3_JD.csv")
-			# dataset_obj = {**data_dict_1, **data_dict_2}
-			# max_out = max(max_out_1, max_out_2)
-			# # dataset_obj, max_out = extract_tls()
-			# # dataset_obj, max_out = extract_pccp()
-			# # max_out = np.array(max_out_list_train)
 			available_datasets = {
-			'pccp': extract_pccp_tac, 'aadapt' : extract_aadapt_tac, 'gen_tac': extract_gen_tac
-		}
-			datasets_to_load_train = args.train_datasets.split(',')
-			datasets_to_load_test = args.test_datasets.split(',')
-			
-			dict_list_train = []
-			max_out_list_train = []
-			dataset_obj_train = {}
-			
-			for name in datasets_to_load_train:
-				if name in available_datasets:
-					extract_function = available_datasets[name]
-					if name == 'gen_tac':
-						data_dict, max_out_value = extract_function(args.train_data_path, args.test_data_path, plot=False, exp=args.exp)
-					else:
-						data_dict, max_out_value = extract_function(args.train_data_path, args.pharmac_path, args.auc_path, plot=False)
-					dict_list_train.append(data_dict)
-					max_out_list_train.append(max_out_value)
-					dataset_obj_train.update(data_dict)
-
-			dict_list_test = []
-			max_out_list_test = []
-			dataset_obj_test = {}
-
-			for name in datasets_to_load_test:
-				if name in available_datasets:
-					extract_function = available_datasets[name]
-					if name == 'gen_tac':
-						data_dict, max_out_value = extract_function(args.train_data_path, args.test_data_path, plot=False, exp=args.exp)
-					else:
-						data_dict, max_out_value = extract_function(args.test_data_path, args.pharmac_path, args.auc_path, plot=False)
-					dict_list_test.append(data_dict)
-					max_out_list_test.append(max_out_value)
-					dataset_obj_test.update(data_dict)
-
+				'pccp': extract_pccp_tac,
+				'aadapt': extract_aadapt_tac,
+				'gen_tac': extract_gen_tac,
+			}
 		elif dataset_name == 'Theo':
-			dict_list_train, max_out_list_train = extract_theo(args.train_data_path, plot=False)
-			dataset_obj_train = dict_list_train
-			dict_list_test, max_out_list_test = extract_theo(args.test_data_path, plot=False)
-			dataset_obj_test = dict_list_test
-		else:
+			available_datasets = {'theo': extract_theo}
+		else:  # PK_MMF
 			available_datasets = {
 				'pccp': extract_pccp,
 				'pigrec': extract_pigrec,
@@ -215,57 +171,53 @@ def parse_datasets(args, device):
 				'ped': extract_ped,
 				'stimmugrep': extract_stimmugrep,
 			}
-			datasets_to_load_train = args.train_datasets.split(',')
-			datasets_to_load_test = args.test_datasets.split(',')
-
-			dict_list_train = []
-			max_out_list_train = []
-			dataset_obj_train = {}
-			
-			for name in datasets_to_load_train:
-				if name in available_datasets:
-					extract_function = available_datasets[name]
-					data_dict, max_out_value = extract_function(plot=False)
-					dict_list_train.append(data_dict)
-					max_out_list_train.append(max_out_value)
-					dataset_obj_train.update(data_dict)
-
-			dict_list_test = []
-			max_out_list_test = []
-			dataset_obj_test = {}
-			
-			for name in datasets_to_load_test:
-				if name in available_datasets:
-					extract_function = available_datasets[name]
-					data_dict, max_out_value = extract_function(plot=False)
-					dict_list_test.append(data_dict)
-					max_out_list_test.append(max_out_value)
-					dataset_obj_test.update(data_dict)
+		# Load training datasets
+		datasets_to_load_train = args.train_datasets.split(',')
+		dict_list_train, max_out_list_train, dataset_obj_train = [], [], {}
+		for name in datasets_to_load_train:
+			if name in available_datasets:
+				extract_function = available_datasets[name]
+				if name == 'gen_tac':
+					data_dict, max_out_value = extract_function(args.train_data_path, args.test_data_path, plot=False, exp=args.exp)
+				elif dataset_name == 'PK_MMF':
+					data_dict, max_out_value = extract_function(args.train_data_path, args.pharmac_path, plot=False)
+				else:
+					data_dict, max_out_value = extract_function(args.train_data_path, args.pharmac_path, args.auc_path, plot=False)
+				dict_list_train.append(data_dict)
+				max_out_list_train.append(max_out_value)
+				dataset_obj_train.update(data_dict)
+		# Load testing datasets
+		datasets_to_load_test = args.test_datasets.split(',')
+		dict_list_test, max_out_list_test, dataset_obj_test = [], [], {}
+		for name in datasets_to_load_test:
+			if name in available_datasets:
+				extract_function = available_datasets[name]
+				if name == 'gen_tac':
+					data_dict, max_out_value = extract_function(args.train_data_path, args.test_data_path, plot=False, exp=args.exp)
+				elif dataset_name == 'PK_MMF':
+					data_dict, max_out_value = extract_function(args.test_data_path, args.pharmac_path, plot=False)
+				else:
+					data_dict, max_out_value = extract_function(args.test_data_path, args.pharmac_path, args.auc_path, plot=False)
+				dict_list_test.append(data_dict)
+				max_out_list_test.append(max_out_value)
+				dataset_obj_test.update(data_dict)
 
 		max_out = {}
-		if max_out_list_train and not isinstance(max_out_list_train[0], float):
-			_max_out_list_train = []
-			_best_lambda_train = []
-			for lst in max_out_list_train:
-				_max_out_list_train.append(lst[0])
-				_best_lambda_train.append(lst[1])
-			max_out_list_train = _max_out_list_train
-			max_out['best_lambda_train'] = np.array(_best_lambda_train)
+		# Process max_out for training data
+		if max_out_list_train and isinstance(max_out_list_train[0], list):
+			max_out['best_lambda_train'] = np.array([lst[1] for lst in max_out_list_train])
+			max_out_list_train = [lst[0] for lst in max_out_list_train]
 
-		if max_out_list_test and not isinstance(max_out_list_test[0], float):
-			_max_out_list_test = []
-			_best_lambda_test = []
-			for lst in max_out_list_test:
-				_max_out_list_test.append(lst[0])
-				_best_lambda_test.append(lst[1])
-			max_out_list_test = _max_out_list_test
-			max_out['best_lambda_test'] = np.array(_best_lambda_test)
+		# Process max_out for testing data
+		if max_out_list_test and isinstance(max_out_list_test[0], list):
+			max_out['best_lambda_test'] = np.array([lst[1] for lst in max_out_list_test])
+			max_out_list_test = [lst[0] for lst in max_out_list_test]
 
-		max_out_list = max_out_list_train + max_out_list_test
-		max_out['max_out'] = np.array(max_out_list)
+		max_out['max_out'] = np.array(max_out_list_train + max_out_list_test)
 
-		train_keys, _ = utils.split_train_test_list_dict(dict_list_train, train_fraq=0.8)
-		_, test_keys = utils.split_train_test_list_dict(dict_list_test, train_fraq=0.0, shuffle=False)
+		# Split keys for training and testing
+		train_keys = list(dataset_obj_train.keys())
+		test_keys = list(dataset_obj_test.keys())
 
 		dataset_train = TacroDataset({k: dataset_obj_train[k] for k in train_keys})
 		dataset_test = TacroDataset({k: dataset_obj_test[k] for k in test_keys})
