@@ -54,9 +54,13 @@ You can install them in R using the following command:
 install.packages(c("argparse", "tidyverse", "mrgsolve", "mapbayr", "MESS", "lixoftConnectors", "glue", "furrr"))
 ```
 
+**Note:** `lixoftConnectors` is crucial for interfacing R with Monolix. Ensure it is correctly installed and compatible with your Monolix version. The `run_everything.sh` script will initialize this connector using the path provided via `--monolix-path`.
+
 ### Monolix
 
 A working installation of Monolix is required to run the comparative pharmacometric models. You can find installation instructions on the [Lixoft website](https://lixoft.com/products/monolix-suite/).
+
+When running the full pipeline (`run_everything.sh`), you must provide the path to the Monolix installation directory (specifically the `monolixSuite` executable or directory containing it) so that the R scripts can locate and utilize the Monolix engine.
 
 ### Guix
 
@@ -95,9 +99,45 @@ Inside each experiment directory, you will find:
 
 Aggregated test results from all experiment runs are compiled into a single file: `exp_run_all/test_gen_tacro_corrected.txt`. This file contains key performance metrics, such as RMSE and prediction errors, making it easy to compare results across different runs.
 
-## Running Experiments
+## Running Individual Models (`run_models.py`)
 
-The main experimental workflow is managed by the `run_everything.sh` script. This script automates data generation, model training, and evaluation.
+The `run_models.py` script is the core Python entry point for training and evaluating the Neural ODE models and baselines. It allows for fine-grained control over model architecture, training hyperparameters, and dataset selection.
+
+### Key Arguments
+
+| Argument | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `-n` | int | 100 | Size of the dataset (number of training examples). |
+| `--niters` | int | 1000 | Number of training iterations/epochs. |
+| `--lr` | float | 1e-2 | Starting learning rate. |
+| `-b`, `--batch-size` | int | 200 | Batch size for training. |
+| `--dataset` | str | `periodic` | Dataset to load (`physionet`, `activity`, `hopper`, `periodic`, `PK_Tacro`, etc.). |
+| `--latent-ode` | flag | False | Run the Latent ODE seq2seq model. |
+| `--ode-rnn` | flag | False | Run the ODE-RNN baseline model. |
+| `--rnn-vae` | flag | False | Run the RNN-VAE baseline model. |
+| `--save` | str | `experiments/` | Directory path to save model checkpoints and logs. |
+| `--load` | str | None | Experiment ID to load for evaluation (if `None`, starts a new experiment). |
+| `--viz` | flag | False | Enable real-time plotting during training (requires display). |
+| `--seed` | int | 15 | Random seed for reproducibility. |
+| `--noise-weight` | float | 0.04 | Noise amplitude for generated trajectories. |
+
+### Example Usage
+
+To train a Latent ODE model on the `PK_Tacro` dataset with specific parameters:
+
+```bash
+python run_models.py --niters 3000 -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5. --save experiments/
+```
+
+To load an existing experiment (e.g., ID 12345) for evaluation:
+
+```bash
+python run_models.py --dataset PK_Tacro --load 12345 --save experiments/
+```
+
+## Pipeline Automation (`run_everything.sh`)
+
+The main experimental workflow is managed by the `run_everything.sh` script. This script automates the entire lifecycle of an experiment, from data generation to analysis.
 
 To run the full pipeline, execute the script from the root of the repository:
 
@@ -105,16 +145,29 @@ To run the full pipeline, execute the script from the root of the repository:
 bash run_everything.sh
 ```
 
-### Command-Line Arguments
+### Workflow
+
+The script executes the following steps sequentially for a range of random seeds:
+
+1.  **Data Generation (`gen_tacro.py`)**: Generates synthetic patient data with specified parameters (e.g., number of patients, first dose time).
+2.  **Monolix Training (`all_run_tacro.R`)**: Uses R and the `lixoftConnectors` package to train a Monolix model on the generated data. This step requires a valid Monolix installation path.
+3.  **NODE Training (`run_models.py`)**: Trains the Neural ODE model using the Python environment.
+4.  **Testing (`test_model.py`)**: Evaluates the trained NODE model on a test set and records metrics like RMSE and prediction error.
+5.  **Analysis (`analyse_std.py`)**: After all runs are complete, this script aggregates and analyzes the results from all seeds.
+
+### Configuration
 
 You can customize the behavior of the script using the following command-line arguments:
 
 - `--main-output-dir <path>`: Specifies the main directory where all experiment outputs will be stored. Defaults to `exp_run_all`.
-- `--monolix-path <path>`: Sets the path to your Monolix installation. Defaults to `/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite`.
-- `--model-file <path>`: Defines the path to the Monolix model file to be used for the analysis.
+- `--monolix-path <path>`: **Critical.** Sets the path to your Monolix installation. This is passed to the R scripts to initialize `lixoftConnectors`. Defaults to `/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite`. You should update this to point to your specific Monolix installation.
+- `--model-file <path>`: Defines the path to the Monolix model file (`.txt`) to be used for the analysis.
 
-Example of a customized run:
+### Example Usage
 
 ```bash
-bash run_everything.sh --main-output-dir /path/to/my/results --monolix-path /opt/monolix/bin/Monolix --model-file /path/to/my/model.txt
+bash run_everything.sh \
+  --main-output-dir "results_v1" \
+  --monolix-path "/opt/MonolixSuite2024R1/lib/monolixSuite" \
+  --model-file "models/tacrolimus_model.txt"
 ```
