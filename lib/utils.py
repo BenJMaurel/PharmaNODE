@@ -6,7 +6,8 @@
 import os
 import logging
 import pickle
-
+import matplotlib.pyplot as plt	
+from sklearn.decomposition import PCA
 import torch
 import torch.nn as nn
 import numpy as np
@@ -18,6 +19,7 @@ from shutil import copyfile
 import sklearn as sk
 import subprocess
 import datetime
+from sklearn.cluster import KMeans
 
 def makedirs(dirname):
 	if not os.path.exists(dirname):
@@ -55,6 +57,200 @@ def get_logger(logpath, filepath, package_files=[],
 
 	return logger
 
+
+def initialize_gmm_with_kmeans(model, data_obj, device, n_batches=20):
+    """
+    Runs a forward pass on a subset of data to get latent embeddings (z0),
+    runs K-Means to find centroids, and initializes the GMM Prior means.
+    """
+    print("\n[Warm Start] Extracting latent embeddings for K-Means initialization...")
+    model.eval()
+    z0_collection = []
+    
+    # We use the train_dataloader to get a representative sample
+    # Note: We assume utils.get_next_batch is available or we iterate manually
+    # For safety with your utils structure, we'll just loop n_batches times
+    with torch.no_grad():
+        for i in range(n_batches):
+            try:
+                batch_dict = get_next_batch(data_obj["train_dataloader"])
+            except StopIteration:
+                # If loader is exhausted, just stop
+                break
+            
+            # Forward pass to get 'info' which contains the encoder output
+            # We assume your VAE_GMM model has the same signature as your base model
+            _, info = model.get_reconstruction(
+                batch_dict["tp_to_predict"], 
+                batch_dict["observed_data"], 
+                batch_dict["observed_tp"], 
+                mask=batch_dict["observed_mask"], 
+                dose=batch_dict['dose'], 
+                static=batch_dict['static'], 
+                n_traj_samples=1,
+                mode=batch_dict["mode"]
+            )
+            
+            # Extract the mean of the first point (latent code z0)
+            # info["first_point"] returns (fp_mu, fp_std, fp_enc)
+            fp_mu, _, _ = info["first_point"]
+            z0_collection.append(fp_mu.cpu())
+
+    # Stack all latent codes: Shape [N_samples, Latent_Dim]
+    all_z0 = torch.cat(z0_collection, dim=1).numpy().squeeze(0)
+    print(f"[Warm Start] Running K-Means (k={model.n_components}) on {all_z0.shape[1]} samples...")
+    
+    # Run K-Means
+    kmeans = KMeans(n_clusters=model.n_components, n_init=20, random_state=42)
+    kmeans.fit(all_z0)
+    centroids = kmeans.cluster_centers_
+
+    # VISUALIZATION BLOCK (Starts Here)
+    # =========================================================================
+    try:
+        print("[Vis] Generating K-Means sanity check plot...")
+        plt.figure(figsize=(10, 8))
+        
+        # If latent dim > 2, use PCA to project down to 2D for plotting
+        if all_z0.shape[1] > 2:
+            pca = PCA(n_components=2)
+            z_2d = pca.fit_transform(all_z0)
+            # CRITICAL: Transform centroids using the SAME PCA to see them in context
+            centroids_2d = pca.transform(centroids)
+            plot_title = f"K-Means Init Check (PCA from {all_z0.shape[1]}D)"
+        else:
+            z_2d = all_z0
+            centroids_2d = centroids
+            plot_title = "K-Means Init Check (2D Latent Space)"
+
+        # 1. Plot the latent points, colored by their assigned cluster
+        scatter = plt.scatter(z_2d[:, 0], z_2d[:, 1], 
+                              alpha=0.5, s=15, label='Latent Data')
+        
+        # 2. Plot the Centroids as big Red Xs
+        plt.scatter(centroids_2d[:, 0], centroids_2d[:, 1], c='red', marker='X', 
+                    s=200, linewidths=3, edgecolors='black', label='Proposed Centroids')
+
+        plt.title(plot_title)
+        plt.xlabel("Dimension 1")
+        plt.ylabel("Dimension 2")
+        plt.legend()
+        plt.colorbar(scatter, label='Cluster Assignment')
+        plt.grid(True, alpha=0.3)
+        
+        # Save to file
+        save_name = "kmeans_initialization_check.png"
+        plt.savefig(save_name)
+        print(f"[Vis] Plot saved to: {os.path.abspath(save_name)}")
+        plt.close() # Close to free memory
+        
+    except Exception as e:
+        print(f"[Vis] Could not generate plot: {e}")
+    # Assign centroids to the model's GMM means
+    new_means = torch.tensor(centroids, dtype=torch.float32).to(device)
+    model.prior_means.data = new_means
+    
+    # We calculate the variance of points assigned to each cluster
+    new_logvars = []
+    labels = kmeans.predict(all_z0)
+    for i in range(model.n_components):
+        cluster_points = all_z0[labels == i]
+        if len(cluster_points) > 1:
+            var = np.var(cluster_points, axis=0)
+            # Avoid numerical instability with small variances
+            var = np.maximum(var, 0.01) 
+            new_logvars.append(np.log(var))
+        else:
+            new_logvars.append(np.zeros(model.latent_dim)) # Fallback
+            
+    model.prior_logvars.data = torch.tensor(np.array(new_logvars), dtype=torch.float32).to(device)
+    
+    # 5. Initialize Weights (Component usage)
+    # We set the prior weights based on how many points fell into each cluster
+    counts = np.bincount(labels, minlength=model.n_components)
+    weights = counts / counts.sum()
+    # Logits = log(weights)
+    model.prior_weights_logits.data = torch.log(torch.tensor(weights, dtype=torch.float32) + 1e-8).to(device)
+
+    print(f">>> GMM Initialized. Means shape: {model.prior_means.shape}")
+    model.train()
+
+def initialize_gmm_with_kmeans_v(model, data_obj, device, n_batches=20):
+    """
+    Runs a forward pass on a subset of data to get latent embeddings (z0),
+    runs K-Means to find centroids, and initializes the GMM Prior means
+    and Covariance Matrices.
+    """
+    print("\n[Warm Start] Extracting latent embeddings for K-Means initialization...")
+    model.eval()
+    z0_collection = []
+    
+    with torch.no_grad():
+        # Loop to collect data
+        for i in range(n_batches):
+            try:
+                batch_dict = get_next_batch(data_obj["train_dataloader"])
+            except StopIteration:
+                break
+            
+            # Forward pass to get latent encoding
+            _, info = model.get_reconstruction(
+                batch_dict["tp_to_predict"], 
+                batch_dict["observed_data"], 
+                batch_dict["observed_tp"], 
+                mask=batch_dict["observed_mask"], 
+                dose=batch_dict['dose'], 
+                static=batch_dict['static'], 
+                n_traj_samples=1,
+                mode=batch_dict["mode"]
+            )
+            
+            # Extract z0 (mean of the posterior)
+            fp_mu, _, _ = info["first_point"]
+            z0_collection.append(fp_mu.cpu())
+
+    # Stack all latent codes: Shape [Total_Samples, Latent_Dim]
+    # Note: changed dim=1 to dim=0 which is standard for stacking batches
+    all_z0 = torch.cat(z0_collection, dim=1).numpy().squeeze(0)
+    # Flatten if necessary (e.g. if shape is [N, 1, D] -> [N, D])
+    if len(all_z0.shape) == 3:
+        all_z0 = all_z0.squeeze(1)
+
+    print(f"[Warm Start] Running K-Means (k={model.n_components}) on {all_z0.shape[0]} samples...")
+    
+    # Run K-Means
+    kmeans = KMeans(n_clusters=model.n_components, n_init=20, random_state=42)
+    kmeans.fit(all_z0)
+    centroids = kmeans.cluster_centers_
+    
+    # -----------------------------------------------------------
+    # UPDATE 1: Assign Centroids to Means
+    # -----------------------------------------------------------
+    new_means = torch.tensor(centroids, dtype=torch.float32).to(device)
+    model.prior_means.data = new_means
+    
+    # -----------------------------------------------------------
+    # UPDATE 2: Initialize Covariances (The Fix)
+    # -----------------------------------------------------------
+    # We initialize the Cholesky factor as Identity Matrices.
+    # This corresponds to spherical variances (std=1.0).
+    # Shape: [n_components, latent_dim, latent_dim]
+    latent_dim = all_z0.shape[1]
+    
+    # Create Identity Matrices
+    identity_matrices = torch.eye(latent_dim).unsqueeze(0).repeat(model.n_components, 1, 1).to(device)
+    
+    # Optional: Scale them down if you want tighter clusters initially (e.g., 0.5 * Eye)
+    # identity_matrices = identity_matrices * 0.7 
+    
+    model.prior_cov_tril.data = identity_matrices
+
+    # Reset mixture weights to uniform
+    model.prior_weights_logits.data.fill_(0.0)
+    
+    print("[Warm Start] GMM Prior Means initialized to K-Means centroids.")
+    print("[Warm Start] GMM Prior Covariances reset to Identity.")
+    print(f"Centroids located at: \n{centroids}\n")
 
 def inf_generator(iterable):
 	"""Allows training with DataLoaders in a single infinite loop:
@@ -319,7 +515,6 @@ def get_ckpt_model(ckpt_path, model, device):
 	ckpt_args = checkpt['args']
 	state_dict = checkpt['state_dict']
 	model_dict = model.state_dict()
-
 	# 1. filter out unnecessary keys
 	state_dict = {k: v for k, v in state_dict.items() if k in model_dict}
 	# 2. overwrite entries in the existing state dict
@@ -607,7 +802,6 @@ def compute_loss_all_batches(model,
 		batch_dict = get_next_batch(test_dataloader)
 		
 		results  = model.compute_all_losses(batch_dict,n_traj_samples = n_traj_samples, kl_coef = kl_coef, max_out = data_obj['max_out'])
-		
 		if args.classif:
 			n_labels = model.n_labels #batch_dict["labels"].size(-1)
 			n_traj_samples = results["label_predictions"].size(0)

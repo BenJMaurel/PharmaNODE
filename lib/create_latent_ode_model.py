@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.nn.functional import relu
 
 from . import utils
-from .latent_ode import LatentODE
+from .latent_ode import LatentODE, LatentODEGMM, LatentODEGMM_V, LatentODEFlow
 from .encoder_decoder import *
 from .diffeq_solver import DiffeqSolver
 from .ode_func import ODEFunc, ODEFunc_w_Poisson
@@ -88,21 +88,89 @@ def create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device,
 	diffeq_solver = DiffeqSolver(gen_data_dim, gen_ode_func, 'dopri5', args.latents, 
 		odeint_rtol = 1e-3, odeint_atol = 1e-4, device = device)
 
-	model = LatentODE(
-		input_dim = gen_data_dim, 
-		latent_dim = args.latents, 
-		encoder_z0 = encoder_z0, 
-		decoder = decoder, 
-		diffeq_solver = diffeq_solver, 
-		z0_prior = z0_prior, 
-		device = device,
-		obsrv_std = obsrv_std,
-		use_poisson_proc = args.poisson, 
-		use_binary_classif = args.classif,
-		linear_classifier = args.linear_classif,
-		classif_per_tp = classif_per_tp,
-		n_labels = n_labels,
-		train_classif_w_reconstr = (args.dataset == "physionet")
-		).to(device)
+	use_gmm = getattr(args, 'use_gmm', False) 
+	use_gmm_v = getattr(args, 'use_gmm_v', False) 
+	use_flow = getattr(args, 'use_flow', False) 
+	if use_gmm:
+		n_components = getattr(args, 'n_components', 5)
+		print(f"Initializing LatentODEGMM with {n_components} clusters.")
+
+		model = LatentODEGMM(
+		    input_dim = gen_data_dim, 
+		    latent_dim = args.latents, 
+		    encoder_z0 = encoder_z0, 
+		    decoder = decoder, 
+		    diffeq_solver = diffeq_solver, 
+		    z0_prior = z0_prior, 
+		    device = device,
+		    n_components = n_components,  # Pass the number of clusters
+		    obsrv_std = obsrv_std,
+		    use_poisson_proc = args.poisson, 
+		    use_binary_classif = args.classif,
+		    linear_classifier = args.linear_classif,
+		    classif_per_tp = classif_per_tp,
+		    n_labels = n_labels,
+		    train_classif_w_reconstr = (args.dataset == "physionet")
+		    ).to(device)
+		
+	elif use_gmm_v:
+		n_components = getattr(args, 'n_components', 5)
+		print(f"Initializing LatentODEGMM with {n_components} clusters.")
+
+		model = LatentODEGMM_V(
+		    input_dim = gen_data_dim, 
+		    latent_dim = args.latents, 
+		    encoder_z0 = encoder_z0, 
+		    decoder = decoder, 
+		    diffeq_solver = diffeq_solver, 
+		    z0_prior = z0_prior, 
+		    device = device,
+		    n_components = n_components,  # Pass the number of clusters
+		    obsrv_std = obsrv_std,
+		    use_poisson_proc = args.poisson, 
+		    use_binary_classif = args.classif,
+		    linear_classifier = args.linear_classif,
+		    classif_per_tp = classif_per_tp,
+		    n_labels = n_labels,
+		    train_classif_w_reconstr = (args.dataset == "physionet")
+		    ).to(device)
+	elif use_flow:
+		print(f"Initializing LatentODEFlow")
+
+		model = LatentODEFlow(
+		    input_dim = gen_data_dim, 
+		    latent_dim = args.latents, 
+		    encoder_z0 = encoder_z0, 
+		    decoder = decoder, 
+		    diffeq_solver = diffeq_solver, 
+		    z0_prior = z0_prior, 
+		    device = device,
+		    obsrv_std = obsrv_std,
+		    use_poisson_proc = args.poisson, 
+		    use_binary_classif = args.classif,
+		    linear_classifier = args.linear_classif,
+		    classif_per_tp = classif_per_tp,
+		    n_labels = n_labels,
+		    train_classif_w_reconstr = (args.dataset == "physionet")
+		    ).to(device)
+	else:
+        # Standard Model
+		model = LatentODE(
+		    input_dim = gen_data_dim, 
+		    latent_dim = args.latents, 
+		    encoder_z0 = encoder_z0, 
+		    decoder = decoder, 
+		    diffeq_solver = diffeq_solver, 
+		    z0_prior = z0_prior, 
+		    device = device,
+		    obsrv_std = obsrv_std,
+		    use_poisson_proc = args.poisson, 
+		    use_binary_classif = args.classif,
+		    linear_classifier = args.linear_classif,
+		    classif_per_tp = classif_per_tp,
+		    n_labels = n_labels,
+		    train_classif_w_reconstr = (args.dataset == "physionet")
+		    ).to(device)
 
 	return model
+
