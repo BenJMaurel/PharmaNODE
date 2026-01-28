@@ -135,6 +135,30 @@ To load an existing experiment (e.g., ID 12345) for evaluation:
 python run_models.py --dataset PK_Tacro --load 12345 --save experiments/
 ```
 
+### Generative Modeling (GMM & Flows)
+
+In addition to the standard Latent ODE with a standard normal prior, the model supports more complex priors for the latent space, which can improve generative performance and clustering.
+
+- **Gaussian Mixture Models (GMM)**:
+  - `--use_gmm`: Initializes a Latent ODE with a GMM prior. The clusters are initialized using K-Means on the latent embeddings after a warm-up period.
+  - `--use_gmm_v`: A variant of the GMM prior model that allows for additional flexibility (e.g., learnable rotations) and re-initialization during training.
+  - `-nc`, `--n_components`: Specifies the number of Gaussian components (clusters) in the latent space. Default is `4`.
+
+- **Normalizing Flows**:
+  - `--use_flow`: Uses a Normalizing Flow as the prior distribution for the latent space, allowing for a more complex and flexible posterior approximation.
+
+**Example: Training with GMM**
+
+```bash
+python run_models.py --dataset PK_Tacro --latent-ode --use_gmm --n_components 5 --save experiments/
+```
+
+**Example: Training with Normalizing Flows**
+
+```bash
+python run_models.py --dataset PK_Tacro --latent-ode --use_flow --save experiments/
+```
+
 ## Pipeline Automation (`run_everything.sh`)
 
 The main experimental workflow is managed by the `run_everything.sh` script. This script automates the entire lifecycle of an experiment, from data generation to analysis.
