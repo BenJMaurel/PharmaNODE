@@ -171,3 +171,45 @@ bash run_everything.sh \
   --monolix-path "/opt/MonolixSuite2024R1/lib/monolixSuite" \
   --model-file "models/tacrolimus_model.txt"
 ```
+
+## Generative Models & Priors
+
+The repository supports different strategies for the generative prior distribution of the latent state $z_0$. Choosing the right prior is crucial for the quality of generated time series.
+
+### 1. Standard VAE (Standard Normal Prior)
+
+**Usage:** Default behavior of `run_models.py`.
+
+In the standard setting, the Latent ODE model acts as a Variational Autoencoder (VAE) where the approximate posterior $q(z_0|x)$ is regularized towards a standard normal prior $p(z_0) = \mathcal{N}(0, I)$.
+
+- **Pros:** Simple, stable training, well-understood.
+- **Cons:** May be too restrictive for complex, multi-modal latent distributions (the "posterior collapse" problem or aggregated posterior mismatch).
+
+### 2. GMM Prior (Gaussian Mixture Model)
+
+**Usage:** Post-hoc fitting using `fit_gaussian.py`.
+
+To handle multi-modal latent structures (e.g., distinct patient subpopulations), you can fit a Gaussian Mixture Model (GMM) to the latent embeddings of a trained model. This approach decouples the representation learning from the density estimation.
+
+**Workflow:**
+1.  Train a standard model using `run_models.py`. Note the Experiment ID (e.g., `12345`).
+2.  Run `fit_gaussian.py` to fit a GMM on the learned latent space and generate new samples.
+
+```bash
+python fit_gaussian.py --load 12345 --dataset PK_Tacro --save experiments/
+```
+
+- **Pros:** Can capture multi-modal distributions effectively; separates training stability from generation quality.
+- **Cons:** Two-stage process; the GMM is not optimized end-to-end with the ODE.
+
+### 3. Normalizing Flows
+
+**Usage:** *Conceptual comparison / Advanced extension.*
+
+Normalizing Flows (e.g., Continuous Normalizing Flows or CNFs) transform a simple base distribution (like a Gaussian) into a complex posterior using a sequence of invertible mappings. In the context of Latent ODEs, a Flow can be used as a flexible prior $p(z_0)$ or to model the approximate posterior $q(z_0|x)$.
+
+- **Comparison:**
+    - **vs. Standard VAE:** Flows are far more expressive, allowing the model to learn non-Gaussian latent densities end-to-end.
+    - **vs. GMM:** Unlike the post-hoc GMM, Flows are typically trained jointly with the model, potentially leading to better aligned latent spaces. However, they are computationally more expensive and harder to train.
+
+*Note: The current provided scripts (`fit_gaussian.py`) implement the GMM approach for improved generation. Flow-based priors would require modifying the `z0_prior` in the model definition.*
