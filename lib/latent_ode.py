@@ -5,7 +5,6 @@
 
 import numpy as np
 import sklearn as sk
-#import gc
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu, softmax
@@ -56,13 +55,11 @@ class LatentODE(VAE_Baseline):
 			truth_w_mask = truth
 			if mask is not None:
 				truth_w_mask = torch.cat((truth, mask), -1)
-				# truth_w_mask = torch.cat((truth_w_mask, dose), -1)
 			elif dose is not None:
 				try:
 					truth_w_mask = torch.cat((truth, dose), -1)
 				except:
-					import pdb; pdb.set_trace()
-				# static = torch.cat((dose, static), -1)
+					pass
 			
 			first_point_mu, first_point_std = self.encoder_z0(
 				truth_w_mask, truth_time_steps, static = static, run_backwards = run_backwards)
@@ -121,9 +118,6 @@ class LatentODE(VAE_Baseline):
 
 
 	def sample_traj_from_prior(self, time_steps_to_predict, n_traj_samples = 1):
-		# input_dim = starting_point.size()[-1]
-		# starting_point = starting_point.view(1,1,input_dim)
-
 		# Sample z0 from prior
 		starting_point_enc = self.z0_prior.sample([n_traj_samples, 1, self.latent_dim]).squeeze(-1)
 
@@ -191,7 +185,7 @@ class LatentODEGMM(VAE_GMM):
                 try:
                     truth_w_mask = torch.cat((truth, dose), -1)
                 except:
-                    pass # pdb was here
+                    pass
             
             # 1. Run Encoder
             first_point_mu, first_point_std = self.encoder_z0(
@@ -407,19 +401,8 @@ class LatentODEGMM_V(VAE_GMM_V):
         u_samples = means + stds * eps # [n_traj_samples, latent_dim]
         
         # 4. Inverse Rotate to get z (z = R^-1 * u)
-        # We use a linear solve for stability instead of explicit inverse
-        # u = z @ W.T  =>  z = u @ (W.T)^-1
-        # In PyTorch linear layers: y = x @ W.T
-        
-        # We need z such that u = Linear(z)
-        # z = u @ W_inverse.T
         W = self.latent_rotation.weight # [Out, In] -> [Dim, Dim]
         
-        # Solve W * z_T = u_T
-        # z_T = torch.linalg.solve(W, u_samples.T)
-        # z = z_T.T
-        
-        # Alternatively, simpler: z = u @ inverse(W).T
         W_inv = torch.inverse(W)
         starting_point_enc = torch.matmul(u_samples, W_inv.t())
         

@@ -74,8 +74,6 @@ class ODE_RNN(Baseline):
 		latent_ys = latent_ys.permute(0,2,1,3)
 		last_hidden = latent_ys[:,:,-1,:]
 
-			#assert(torch.sum(int_lambda[0,0,-1,:] <= 0) == 0.)
-
 		outputs = self.decoder(latent_ys)
 		# Shift outputs for computing the loss -- we should compare the first output to the second data point, etc.
 		first_point = data[:,0,:]

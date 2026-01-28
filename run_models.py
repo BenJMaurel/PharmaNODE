@@ -109,8 +109,6 @@ utils.makedirs(args.save)
 #####################################################################################################
 
 if __name__ == '__main__':
-	# torch.manual_seed(args.random_seed)
-	# np.random.seed(args.random_seed)
 	torch.manual_seed(args.seed)
 	seed = np.random.seed(args.seed)
 	experimentID = args.load
@@ -249,7 +247,6 @@ if __name__ == '__main__':
 	#Load checkpoint and evaluate the model
 	if args.load is not None:
 		utils.get_ckpt_model(ckpt_path, model, device)
-		# exit()
 	##################################################################
 	# Training
 
@@ -334,21 +331,7 @@ for itr in range(1, num_batches * (args.niters + 1)):
         initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
         model.latent_rotation.weight.requires_grad = True
         
-        # 2. Add Parametrization (Orthogonality) NOW if you want strict rotation
-        # (Optional but recommended if using the 'Parametrization' method)
-        # torch.nn.utils.parametrizations.orthogonal(model.latent_rotation, "weight")
-        # 3. Re-initialize Optimizer to include the new parameter
         optimizer = torch.optim.Adamax(model.parameters(), lr=args.lr * 0.1) # Lower LR for fine-tuning
-        
-    # epoch = itr // num_batches
-    # wait_until_kl_inc = 0
-    # max_kl_beta = 20.0 # <--- Cap at 5.0 instead of 1.0
-    
-    # if epoch < wait_until_kl_inc:
-    #     kl_coef = 0.
-    # else:
-    #     # Reaches 5.0 quickly
-    #     kl_coef = min(max_kl_beta, (epoch - wait_until_kl_inc) / 1)
 
     batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
     train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
@@ -444,7 +427,6 @@ for itr in range(1, num_batches * (args.niters + 1)):
 
             if "mse" in test_res:
                 writer.add_scalar('MSE/test_raw', current_raw_mse, itr) # Log raw MSE
-                # writer.add_scalar('MSE/test_smoothed', smoothed_test_mse, itr) # Log smoothed MSE
             if "rmse_auc" in test_res:
                 writer.add_scalar('MSE/rmse_auc', test_res["rmse_auc"].item(), itr) # Log raw MSE
             if "ce_loss" in test_res and not torch.isnan(test_res["ce_loss"]):

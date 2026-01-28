@@ -202,11 +202,6 @@ class Encoder_z0_ODE_RNN(nn.Module):
             nn.Tanh(),
             nn.Linear(64, self.latent_dim)
         )
-		# self.static_encoder = nn.Sequential(
-        #     nn.Linear(6, 64),
-        #     nn.Tanh(),
-        #     nn.Linear(64, self.latent_dim)
-        # )
 		self.transform_z0 = nn.Sequential(
 		   nn.Linear(latent_dim * 2, 100),
 		   nn.Tanh(),
@@ -258,7 +253,6 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		if static == None:
 			prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 		else:
-			# prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 			prev_y = self.static_encoder(static).unsqueeze(0)
 		prev_std = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 
@@ -312,7 +306,7 @@ class Encoder_z0_ODE_RNN(nn.Module):
 			latent_ys.append(yi)
 
 			if save_info:
-				d = {"yi_ode": yi_ode.detach(), #"yi_from_data": yi_from_data,
+				d = {"yi_ode": yi_ode.detach(),
 					 "yi": yi.detach(), "yi_std": yi_std.detach(), 
 					 "time_points": time_points.detach(), "ode_sol": ode_sol.detach()}
 				extra_info.append(d)

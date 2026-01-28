@@ -61,11 +61,8 @@ class GRUCellExpDecay(RNNCellBase):
 		return hy
 
 	def forward(self, input, hx=None):
-		# type: (Tensor, Optional[Tensor]) -> Tensor
-		#self.check_forward_input(input)
 		if hx is None:
 			hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-		#self.check_forward_hidden(input, hx, '')
 		
 		return self.gru_exp_decay_cell(
 			input, hx,
@@ -231,7 +228,6 @@ class Classic_RNN(Baseline):
 			nn.Tanh(),
 			nn.Linear(n_units, input_dim),)
 
-		#utils.init_network_weights(self.encoder)
 		utils.init_network_weights(self.decoder)
 
 		if cell == "gru":
@@ -362,7 +358,6 @@ class RNN_VAE(VAE_Baseline):
 			nn.Tanh(),
 			nn.Linear(n_units, input_dim),)
 
-		#utils.init_network_weights(self.encoder)
 		utils.init_network_weights(self.decoder)
 
 		if input_space_decay:
