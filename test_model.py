@@ -7,7 +7,6 @@ import os
 import sys
 import matplotlib
 matplotlib.use('TkAgg')
-# matplotlib.use('Agg')
 import matplotlib.pyplot
 import matplotlib.pyplot as plt
 import itertools
@@ -235,9 +234,6 @@ if __name__ == '__main__':
 
 	##################################################################
 
-	# if args.viz:
-	# 	viz = Visualizations(device)
-
 	##################################################################
 	
 	#Load checkpoint and evaluate the model
@@ -284,8 +280,6 @@ if __name__ == '__main__':
 			
 			all_labels.append(others[:,-1])
 
-
-			# all_labels.append(auc_red[:,0])
 			latent_z0_var = info["first_point"][1]
 			latent_z0_mean = info["first_point"][0]
 			all_latent_z0_means.append(latent_z0_mean.squeeze(0))
@@ -293,28 +287,14 @@ if __name__ == '__main__':
 			all_data.append(data)
 			all_reconstructions.append(reconstructions)
 		original_indices = dataset.cpu().numpy().astype(int)
-		# original_indices = static[:,1].cpu().numpy().astype(int)
 		unique_values = np.unique(original_indices)
 	
-	# reconstructions[:, :, 50:, :] = 0
 	train_full = 1
 	if len(unique_values)==1 or train_full == 1:
 		new_indices = original_indices
 	else:
 		new_indices = np.searchsorted(unique_values, original_indices)
 	scaling_factor = data_obj['max_out']['max_out'][new_indices]
-	# scaling_factor = data_obj['max_out'][dataset.cpu().numpy().astype(int)]
-	# scaling_factor = data_obj['max_out'][(all_labels[0]).cpu().numpy().astype(int)]
-	
-	# scaling_factor = data_obj['max_out']
-	# mean, std = data_obj['dataset_train'].mean, data_obj['dataset_train'].std
-	# data = data.detach().numpy()*data_obj["max_out"]
-	# reconstructions = reconstructions.detach().numpy()*data_obj["max_out"]
-	
-	# data = ((data.detach()*std) + mean).numpy()
-	# reconstructions = ((reconstructions.detach()*std) + mean).numpy()
-	# data = torch.cat(all_data)
-	# reconstructions = torch.cat(all_reconstructions)	
 	if 'best_lambda' in data_obj['max_out'].keys():
 		data = inv_boxcox(data, data_obj['max_out']['best_lambda'][0])
 		reconstructions = inv_boxcox(reconstructions, data_obj['max_out']['best_lambda'][0])
@@ -325,14 +305,8 @@ if __name__ == '__main__':
 			auc_red = (auc_red*scaling_factor)
 		elif len(auc_red.shape) == 2:
 			auc_red = (auc_red*scaling_factor[:, np.newaxis]).squeeze(-1)
-	# 	# pass
-	# else:
-	# 	auc_red = None
 	data = data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
 	reconstructions = reconstructions.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
-	# reconstructions = reconstructions.detach().numpy()
-	# data = data.detach().numpy()
-	# reconstructions = reconstructions.detach().numpy()
 	try:
 		auc_be = auc_be.detach().numpy()*scaling_factor[:, np.newaxis]
 	except:
@@ -340,10 +314,8 @@ if __name__ == '__main__':
 	# Create a figure
 	all_labels = list(itertools.chain(*all_labels))
 	fig = plt.figure()
-	# # Add a single subplot (1 row, 1 column, 1st plot)
 	ax = fig.add_subplot(1, 1, 1)
 	fig, ax = plt.subplots(figsize=(10, 7))
-	# error, rmse, cat_metrics = plot_auc(ax, data, reconstructions, y_true_times, time_steps_to_predict, auc_red = auc_red, auc_be = None, labels = all_labels, patient_ids=patient_id)
 	error, rmse, cat_metrics, error_be, rmse_be, cat_be_metrics, indices_a_thresh = plot_auc(ax, data, reconstructions, y_true_times, time_steps_to_predict, auc_be = auc_be, auc_red = auc_red,labels = all_labels, patient_ids=patient_id, args = args)
 	
 	print(f"Error comparison:\n"
@@ -361,63 +333,7 @@ if __name__ == '__main__':
 		print(f"  - rmse_be = {rmse_be:.4f}\n")
 	except:
 		print(f"  - RMSE_be1 = {rmse_be[0]:.4f}\n  - RMSE_be2 = {rmse_be[1]:.4f}\n")
-	# for i in [0,1]:
-	# 	print(f"Error comparison {i} :\n"
-	# 	f"  - error    = {cat_metrics[1.0*i]['error']:.4f}\n"
-	# 	f"  - error_be = {cat_be_metrics[1.0*i]['error']:.4f}\n")
-
-	# 	print(f"RMSE comparison {i} :\n"
-	# 		f"  - rmse     ={cat_metrics[1.0*i]['rmse']:.4f}\n"
-	# 		f"  - rmse_be = {cat_be_metrics[1.0*i]['rmse']:.4f}\n")
-	# bad_results = torch.zeros(len(all_labels))
-	
-	# all_labels = bad_results.scatter_(0, torch.tensor(indices_a_thresh), True)
-	# all_labels = auc_red
-	# plt.show()
 	try:
 		plt.savefig(f"exp_run_all/{args.load}/results.png", dpi=300, bbox_inches="tight")
 	except:
 		pass
-	# all_latent_z0_means = np.concatenate(all_latent_z0_means, axis=0)
-	# all_latent_z0_var = np.concatenate(all_latent_z0_var, axis=0)
-	# # all_latent_z0_means = np.concatenate([all_latent_z0_means, all_latent_z0_var], axis = 1)
-	# # 1. PCA Visualization
-	
-	# center_value = torch.mean(torch.tensor(all_labels))
-
-	# # 2. Create a normalization object centered on the mean
-	# # This maps the data range to the colormap with the mean as the neutral center
-	# norm = mcolors.TwoSlopeNorm(vcenter=center_value)
-	# mean_variances = np.mean(all_latent_z0_var, axis=1)
-	# print("\nPerforming PCA...")
-	# pca = PCA(n_components=2)
-	# latent_pca = pca.fit_transform(all_latent_z0_means)
-	# print(f"Explained variance ratio by PCA components: {pca.explained_variance_ratio_}")
-	# plt.figure(figsize=(10, 7))
-	# # sns.scatterplot(x=latent_pca[:, 0], y=latent_pca[:, 1], hue=plot_labels, palette="viridis", legend="full" if plot_labels is not None else False)
-	# # sns.scatterplot(x=latent_pca[:, 0], y=latent_pca[:, 1], hue=plot_labels, palette="viridis", legend="full" if plot_labels is not None else False)
-	# scatter_pca = plt.scatter(latent_pca[:, 0], latent_pca[:, 1], c=all_labels, cmap='coolwarm', norm = norm, s=mean_variances*300, edgecolor = 'black', alpha=0.7, linewidths=0.5)
-	
-	# plt.title('Latent Space (z0) - PCA')
-	# plt.xlabel('PCA Component 1')
-	# plt.ylabel('PCA Component 2')
-	# plt.grid(True, linestyle='--', alpha=0.6)
-	# # Add color bar
-	# cbar_pca = plt.colorbar(scatter_pca)
-	# cbar_pca.set_label('Choosen parameter')
-	# plt.show()
-
-	# # # 2. t-SNE Visualization
-	# print("\nPerforming t-SNE... (this may take a moment)")
-	# tsne = TSNE(n_components=2, perplexity=min(30, 40-1), random_state=42, n_iter=300) # Adjust perplexity if few samples
-	# latent_tsne = tsne.fit_transform(all_latent_z0_means)
-	# plt.figure(figsize=(10, 7))
-	# scatter_tsne = plt.scatter(latent_tsne[:, 0], latent_tsne[:, 1], c=all_labels, cmap='coolwarm', norm = norm, s=mean_variances*300, edgecolor = 'black', alpha=0.7, linewidths=0.5)
-	# plt.title('Latent Space (z0) - t-SNE')
-	# plt.xlabel('t-SNE Component 1')
-	# plt.ylabel('t-SNE Component 2')
-	# plt.grid(True, linestyle='--', alpha=0.6)
-	# # Add color bar
-	# cbar_pca = plt.colorbar(scatter_tsne)
-	# cbar_pca.set_label('Choosen parameter')
-	# plt.show()

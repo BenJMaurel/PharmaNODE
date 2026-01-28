@@ -339,10 +339,6 @@ class VAE_Baseline(nn.Module):
 		# Condition on subsampled points
 		# Make predictions for all the points
 		
-		# pred_y, info = self.get_reconstruction(batch_dict["tp_to_predict"], 
-		# 	batch_dict["observed_data"], batch_dict["observed_tp"], 
-		# 	mask = batch_dict["observed_mask"], dose = batch_dict['dose'], n_traj_samples = n_traj_samples,
-		# 	mode = batch_dict["mode"])
 		pred_y, info = self.get_reconstruction(batch_dict["tp_to_predict"], 
 			batch_dict["observed_data"], batch_dict["observed_tp"], 
 			mask = batch_dict["observed_mask"], dose = batch_dict['dose'], static = batch_dict['static'], n_traj_samples = n_traj_samples,
@@ -357,15 +353,10 @@ class VAE_Baseline(nn.Module):
 				reconstructions = inv_boxcox(reconstructions, max_out['best_lambda'][0])
 			reconstructions = reconstructions.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
 			data = data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
-			# reconstructions[:, batch_dict['static'][:,1].bool(), 50:, :] = 0
 			times = batch_dict['y_true_times']
 			reference = np.trapz(data.squeeze(-1), times, axis=1)
-			# auc_red = batch_dict['auc_red']*scaling_factor
 			predicted = np.mean(np.array(reconstructions), axis=0)
 			predicted = np.trapz(predicted.squeeze(-1), batch_dict["tp_to_predict"], axis=1)
-			# for i in range(len(predicted)):
-			# 	import pdb; pdb.set_trace()
-			# 	rmse_patient = np.array((np.array(reference[i]) - predicted[i]) / reference[i])**2
 			rmse_overall = np.sqrt(np.mean(np.array((np.array(reference) - predicted) / reference)**2))
 		
 			
@@ -382,7 +373,6 @@ class VAE_Baseline(nn.Module):
 				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
 			except:
 				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
-		# print("get_reconstruction done -- computing likelihood")
 		fp_mu, fp_std, fp_enc = info["first_point"]
 		fp_std = fp_std.abs()
 		fp_distr = Normal(fp_mu, fp_std)
@@ -404,9 +394,6 @@ class VAE_Baseline(nn.Module):
 		
 		kldiv_z0 = torch.mean(kldiv_z0,(1,2))
 		# Compute likelihood of all the points
-		# rec_likelihood = self.get_gaussian_likelihood(
-		# 	batch_dict["data_to_predict"], pred_y,
-		# 	mask = batch_dict["mask_predicted_data"])
 		rec_likelihood = self.get_gaussian_likelihood(
 			batch_dict["data_to_predict"], pred_y,
 			mask = valid_times_mask)
@@ -751,7 +738,6 @@ class VAE_GMM(VAE_Baseline):
         
         # Save cluster assignment probabilities (useful for analysis!)
         results["cluster_probs"] = cluster_responsibilities.detach()
-        # print(results["cluster_probs"])
         if batch_dict["labels"] is not None and self.use_binary_classif:
             results["label_predictions"] = info["label_predictions"].detach()
 
