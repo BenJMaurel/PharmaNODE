@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split
 import argparse
 import torch.distributions as dist
 import seaborn as sns
-import os
 
 
 
@@ -31,6 +30,15 @@ POPULATION_PARAMS = {
     'Q': 79.0,                  # Apparent inter-compartmental clearance (L/h)
     'theta7_Vc_study': 0.29,    # Multiplier for Vc for Prograf
     'Vp': 271.0,                # Apparent peripheral volume (L)
+
+    # --- NEW PARAMETERS FOR NON-LINEAR ELIMINATION ---
+    # Assuming Vmax/Km approx equals the linear CL (21.2)
+    # Km set to 20 ug/L (typical saturation point for Tacro is higher, 
+    # but 20 ensures non-linearity is visible in your simulation)
+    'Vp2' : 292.0,
+    'Q2' : 75.0,
+    'theta_Km': 0.01,           
+    'theta_Vmax': 21.2 * 0.01  # Base Vmax (approx 424)
 }
 
 # Inter-Patient Variability (IPV) as standard deviation of the random effect
@@ -39,7 +47,13 @@ IPV_OMEGA = {
     'Vc':  np.sqrt(0.10), # 0.316
     'Q':   np.sqrt(0.29), # 0.539
     'Vp':  np.sqrt(0.36), # 0.6
+    
     'Ktr': np.sqrt(0.06), # 0.245
+    # --- NEW IPV ---
+    'Vp2': np.sqrt(0.36),
+    'Q2': np.sqrt(0.29),
+    'Vmax': np.sqrt(0.08), # Assume Vmax varies like CL
+    'Km': np.sqrt(0.10)    # Assume some variability on Km
 }
 
 # Inter-Occasion Variability (IOV) as standard deviation of the random effect
@@ -68,6 +82,7 @@ class TacrolimusPK(nn.Module):
                  hematocrit=35.0, 
                  cyp_status='non_expresser',
                  distribution_type = 'log_normal',
+                 scenario = 1,
                  device=torch.device("cpu"), 
                  adjoint=False):
         """
@@ -100,7 +115,7 @@ class TacrolimusPK(nn.Module):
         self.pop_params = POPULATION_PARAMS
         self.ipv = IPV_OMEGA
         self.iov = IOV_KAPPA
-        
+        self.scenario = scenario
         # This dictionary will hold the sampled parameters for a given simulation
         self.individual_params = {}
 
@@ -125,9 +140,33 @@ class TacrolimusPK(nn.Module):
         tv_q = self.pop_params['Q']
         tv_vc = self.pop_params['theta6_Vc'] * (self.pop_params['theta7_Vc_study'] ** study_factor)
         tv_vp = self.pop_params['Vp']
+
+        
+        # We apply the CL covariates (Hematocrit, CYP) to Vmax instead of CL
+        # Because Vmax represents the enzyme capacity
+        if self.scenario ==3:
+            tv_vmax = self.pop_params['theta_Vmax'] * \
+                    ((self.hematocrit / 35.0) ** self.pop_params['theta4_CL_HT']) * \
+                    (self.pop_params['theta5_CL_CYP'] ** cyp_factor)
+            
+            tv_km = self.pop_params['theta_Km']
+
         distribution_type = self.distribution_type
+        
         # --- 2. Apply IPV and IOV based on the chosen distribution ---
         params = {'Ktr': tv_ktr, 'CL': tv_cl, 'Q': tv_q, 'Vc': tv_vc, 'Vp': tv_vp}
+        if self.scenario ==3:
+            params = {
+                'Ktr': tv_ktr,
+                'CL': tv_cl,
+                'Q': tv_q, 
+                'Vc': tv_vc, 
+                'Vp': tv_vp, 
+                'Vp2': self.pop_params['Vp2'], 
+                'Q2': self.pop_params['Q2'],
+                'Vmax': tv_vmax,
+                'Km': tv_km
+            }
         if distribution_type not in ['log_normal', 'log_t']:
             raise ValueError("distribution_type must be 'log_normal' or 'log_t'")
 
@@ -186,9 +225,22 @@ class TacrolimusPK(nn.Module):
         dA_gut2_dt = Ktr * A_gut1 - Ktr * A_gut2
         dA_gut3_dt = Ktr * A_gut2 - Ktr * A_gut3
         input_to_central = Ktr * A_gut3
-        dA_central_dt = input_to_central - (k_elim * A_central) - (k_12 * A_central) + (k_21 * A_peripheral)
-        dA_peripheral_dt = (k_12 * A_central) - (k_21 * A_peripheral)
-        # return dA_gut1_dt, dA_gut2_dt, dA_gut3_dt, dA_central_dt, dA_peripheral_dt
+
+        if self.scenario <3:
+            dA_central_dt = input_to_central - (k_elim * A_central) - (k_12 * A_central) + (k_21 * A_peripheral)
+            dA_peripheral_dt = (k_12 * A_central) - (k_21 * A_peripheral)
+
+        else:
+            Vmax = self.individual_params['Vmax']
+            Km = self.individual_params['Km']
+            Vp2_F = self.individual_params['Vp2']
+            Q2_F = self.individual_params['Q2']
+            #--- NEW: Calculate Concentration & Saturable Elimination ---
+            # Concentration in Central Compartment = Amount / Volume
+            C_central = A_central / Vc_F
+            dA_central_dt = input_to_central - (Vmax * C_central) / (Km + C_central) - (k_12 * A_central) + (k_21 * A_peripheral)
+            dA_peripheral_dt = (k_12 * A_central) - (k_21 * A_peripheral)
+
         return dA_depot_dt, dA_gut1_dt, dA_gut2_dt, dA_gut3_dt, dA_central_dt, dA_peripheral_dt
     
     def get_initial_state(self):
@@ -250,6 +302,7 @@ class TacrolimusPK(nn.Module):
                     # Update state for the next interval
                     state = tuple(s[-1] for s in solution)
             # Apply dose if it's not the first one (already applied)
+            
             if event_t > 0.0:
                  state = self.state_update(state) 
             last_time = torch.tensor([event_t], device=self.device)
@@ -280,8 +333,10 @@ def compare_distributions(num_patients=5000, t_df=4):
 
     for i in range(num_patients):
         # Instantiate a model with typical covariates
-        model_normal = TacrolimusPK(formulation='Advagraf', hematocrit=35.0, distribution_type='log_normal', cyp_status='non_expresser')
-        model_t = TacrolimusPK(formulation='Advagraf', hematocrit=35.0, distribution_type='log_t', cyp_status='non_expresser')
+        formulation = random.choice(['Prograf', 'Advagraf'])
+        cyp_status = random.choice(['expresser', 'non_expresser'])
+        model_normal = TacrolimusPK(formulation=formulation, hematocrit=35.0, distribution_type='log_normal', cyp_status=cyp_status, scenario = 1)
+        model_t = TacrolimusPK(formulation=formulation, hematocrit=35.0, distribution_type='log_normal', cyp_status=cyp_status, scenario = 3)
         # 1. Sample from Log-Normal distribution
         params_ln = model_normal._sample_individual_parameters()
         for p_name, p_val in params_ln.items():
@@ -323,8 +378,116 @@ def compare_distributions(num_patients=5000, t_df=4):
     axes[5].set_visible(False)
     fig.suptitle('Comparison of Parameter Distributions', fontsize=18, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-    plt.show()
+    # plt.show()
 
+def compare_trajectories(num_patients=20):
+    """
+    Simulates and plots concentration-time trajectories for Scenario 1 (Linear)
+    vs Scenario 3 (Non-Linear/Saturable) to visualize structural differences.
+    
+    Args:
+        num_patients (int): Number of patients to simulate (keep low, e.g., 20, for clarity).
+        dose_mg (float): Dose amount. MUST be high (e.g., 5.0 mg or higher) to trigger saturation.
+    """
+    print(f"Simulating trajectories for {num_patients} patients...")
+    
+    results = []
+    
+    # Define dense time points for smooth curves (0 to 24 hours)
+    # We use a tensor for the simulation
+    sim_times = torch.arange(0, 24.1, 0.1) 
+    
+    # We use the same seed/covariates for paired comparison
+    for i in range(num_patients):
+        
+        # 1. Randomize Covariates (shared between both scenarios for this patient)
+        formulation = random.choice(['Prograf', 'Advagraf'])
+        cyp = random.choice(['expresser', 'non_expresser'])
+        hct = random.uniform(25.0, 45.0)
+        
+        # 2. Instantiate Scenario 1 (Linear Base)
+        # We assume your class logic uses 'scenario' to switch between CL and Vmax/Km
+        model_linear = TacrolimusPK(
+            formulation=formulation, 
+            hematocrit=hct, 
+            cyp_status=cyp, 
+            scenario=1  # Linear
+        )
+        
+        
+        
+        # 3. Instantiate Scenario 3 (Non-Linear Saturation)
+        model_nonlinear = TacrolimusPK(
+            formulation=formulation, 
+            hematocrit=hct, 
+            cyp_status=cyp, 
+            scenario=3  # Non-Linear (Michaelis-Menten)
+        )
+        model_linear.dose_mg = model_nonlinear.dose_mg # Force a specific dose for fair comparison
+        # 4. Simulate
+        # Note: We assume .simulate() returns a tensor of concentrations
+        # We pass dosing_times=[0] for a single dose to see the decay shape clearly
+        conc_linear = model_linear.simulate(dosing_times=[0.0], time_points=sim_times)
+        conc_nonlinear = model_nonlinear.simulate(dosing_times=[0.0], time_points=sim_times)
+        
+        # Convert to ng/mL (assuming output is mg/L, multiply by 1000)
+        conc_linear = conc_linear.detach().cpu().numpy().flatten() * 1000
+        conc_nonlinear = conc_nonlinear.detach().cpu().numpy().flatten() * 1000
+        t_np = sim_times.detach().cpu().numpy()
+
+        # 5. Store Data
+        for t, c_lin, c_nonlin in zip(t_np, conc_linear, conc_nonlinear):
+            # Store Linear
+            results.append({
+                'Patient': i, 
+                'Time': t, 
+                'Concentration': c_lin, 
+                'Model': 'Scenario 1 (Linear)'
+            })
+            # Store Non-Linear
+            results.append({
+                'Patient': i, 
+                'Time': t, 
+                'Concentration': c_nonlin, 
+                'Model': 'Scenario 3 (Saturable)'
+            })
+
+    df = pd.DataFrame(results)
+
+    # --- Plotting ---
+    print("Simulation complete. Generating comparison plots...")
+    sns.set_style("whitegrid")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Plot 1: Standard Linear Scale
+    # Good for seeing differences in Peak Concentration (Cmax)
+    sns.lineplot(
+        data=df, x='Time', y='Concentration', 
+        hue='Model', units='Patient', estimator=None, alpha=0.5, linewidth=1, ax=axes[0]
+    )
+    axes[0].set_title(f'Linear Scale', fontsize=14, fontweight='bold')
+    axes[0].set_ylabel('Concentration (ng/mL)')
+    axes[0].set_xlabel('Time (h)')
+    
+    # Plot 2: Log Scale
+    # CRITICAL for proving structural difference.
+    # Linear model = Straight line decay.
+    # Non-linear model = Curved decay.
+    sns.lineplot(
+        data=df, x='Time', y='Concentration', 
+        hue='Model', units='Patient', estimator=None, alpha=0.5, linewidth=1, ax=axes[1]
+    )
+    axes[1].set_yscale('log')
+    axes[1].set_title(f'Log-Linear Scale (Visualizing Saturation)', fontsize=14, fontweight='bold')
+    axes[1].set_ylabel('Log Concentration (ng/mL)')
+    axes[1].set_xlabel('Time (h)')
+    
+    # Add a limit to avoid log(0) issues if concentration drops too low
+    axes[1].set_ylim(bottom=1.0) 
+
+    plt.tight_layout()
+    plt.show()
 
 # if __name__ == '__main__':
 #     # --- Simulation setup ---
@@ -385,7 +548,7 @@ def compare_distributions(num_patients=5000, t_df=4):
 #     plt.legend()
 #     plt.show()
 
-def generate_virtual_cohort(num_patients=10):
+def generate_virtual_cohort(num_patients=10, scenario = 1):
     """
     Generates a CSV file for a virtual cohort of patients.
 
@@ -396,7 +559,7 @@ def generate_virtual_cohort(num_patients=10):
         pandas.DataFrame: A dataframe containing the full cohort data.
     """
     all_patients_df = []
-    nbr_ss = 4
+    nbr_ss = 6
     # Define the time points for concentration measurement
     observation_times = torch.tensor([0, 0.33, 0.67, 1., 1.5, 2., 3., 4., 6., 9., 12., 24.])+24*nbr_ss
     
@@ -414,13 +577,15 @@ def generate_virtual_cohort(num_patients=10):
         formulation = random.choice(['Prograf', 'Advagraf'])
         cyp_status = random.choice(['expresser', 'non_expresser'])
         hematocrit = random.uniform(25.0, 45.0)
-        hematocrit = 35.
+        if scenario != 2:
+            hematocrit = 35.
         # Instantiate the model for this patient
         pk_model = TacrolimusPK(
             formulation=formulation,
             hematocrit=hematocrit,
             distribution_type='log_normal',
-            cyp_status=cyp_status
+            cyp_status=cyp_status,
+            scenario = scenario
         )
 
         # Simulate to get concentration values
@@ -437,11 +602,9 @@ def generate_virtual_cohort(num_patients=10):
             )*1000
         else:
             true_concentrations_all = pk_model.simulate(
-                dosing_times=[24*nbr_ss - 12*(nbr_ss - i) for i in range(nbr_ss+1)], # Every 24h,
+                dosing_times=[24*nbr_ss - 12*(nbr_ss - i) for i in range(nbr_ss+1)], # Every 12h,
                 time_points=all_sim_times
             )*1000
-
-        
         mask = torch.isin(all_sim_times, sim_times)
         true_concentrations = true_concentrations_all[mask]
         # --- Structure the data for this patient ---
@@ -535,45 +698,50 @@ def generate_virtual_cohort(num_patients=10):
 
 
 if __name__ == '__main__':
+    # Define the number of patients for the virtual cohort
     parser = argparse.ArgumentParser('Generation Tacro')
+    parser.add_argument('--exp', type=str, default='exp_all_run/', help="Path for save experiment")
     parser.add_argument('--num_patients', type=int, default=1000, help="Number of virtual patients to generate")
-    parser.add_argument('--output-dir', type=str, default='data/tacro', help="Directory to save the generated data")
-    parser.add_argument('--first_at', type=int, default=0, help="Generate test set (1: train+test, 2: test only)")
+    parser.add_argument('--first_at', type=int, default=1, help="Do you want to generate test set also?")
+    parser.add_argument('--scenario', type=int, default=3, help="Type of scenario you want (cf paper)")
     args = parser.parse_args()
-
-    # Ensure the output directory exists
-    os.makedirs(args.output_dir, exist_ok=True)
-
+    NUM_VIRTUAL_PATIENTS = args.num_patients
+    
     # Generate the dataset
-    cohort_df = generate_virtual_cohort(num_patients=args.num_patients)
-
-    # Get a list of all unique IDs
+    cohort_df = generate_virtual_cohort(num_patients=NUM_VIRTUAL_PATIENTS, scenario = args.scenario)
+    
+    
+    # Save the dataset to a CSV file
+    # 1. Get a list of all unique IDs
     unique_ids = cohort_df['ID'].unique()
 
-    # Split IDs into training and testing sets
+    # 2. Split the unique IDs into training (80%) and testing (20%) sets
+    # random_state ensures the split is the same every time you run the code
     if args.first_at == 1:
         train_ids, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
     elif args.first_at == 2:
-        train_ids, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
+        _, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
     else:
+        # train_ids, test_ids = train_test_split(unique_ids, test_size=0.0, shuffle=False)
         train_ids = unique_ids
-        test_ids = []
 
-    # Create and save train_df
-    if train_ids is not None and len(train_ids) > 0:
+    # 3. Filter the original DataFrame to create train and test sets
+    if args.first_at <= 1:
         train_df = cohort_df[cohort_df['ID'].isin(train_ids)]
-        train_csv_path = os.path.join(args.output_dir, 'virtual_cohort_train.csv')
-        train_df.to_csv(train_csv_path, index=False)
-        print(f"Training data saved to {train_csv_path}")
-
-    # Create and save test_df
-    if test_ids is not None and len(test_ids) > 0:
+        train_df.to_csv('virtual_cohort_train.csv', index=False)
+    if args.first_at >= 1:
         test_df = cohort_df[cohort_df['ID'].isin(test_ids)]
-        test_csv_path = os.path.join(args.output_dir, 'virtual_cohort_test.csv')
-        test_df.to_csv(test_csv_path, index=False)
-        print(f"Test data saved to {test_csv_path}")
-
-    print(f"\nSuccessfully created virtual cohort with {args.num_patients} patients.")
+        test_df.to_csv('virtual_cohort_test.csv', index=False)
+    # 4. Save the two new DataFrames to separate .csv files
+    try:
+        if args.first_at <= 1:
+            train_df.to_csv(f'exp_run_all/{args.exp}/virtual_cohort_train.csv', index=False)
+        if args.first_at >= 1:
+            test_df.to_csv(f'exp_run_all/{args.exp}/virtual_cohort_test.csv', index=False)
+    except:
+        pass
+    print(f"\nSuccessfully created virtual cohort with {NUM_VIRTUAL_PATIENTS} patients.")
+    print(f"Data saved to virtual_cohort_train")
     
     # Display the first few rows of the generated file
     print("\n--- File Head ---")

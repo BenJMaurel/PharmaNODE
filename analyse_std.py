@@ -147,7 +147,7 @@ def create_boxplots(metrics, output_filename="model_performance_boxplots_all.png
 
     # ✨ REMOVED sharey=True from this line
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    fig.suptitle('Distribution of Model Performance Metrics Across Runs', fontsize=16)
+    # fig.suptitle('Distribution of Model Performance Metrics Across Runs', fontsize=16)
 
     # --- Prepare data and plot for Error metrics ---
     error_data = []

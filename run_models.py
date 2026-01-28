@@ -21,6 +21,7 @@ import pandas as pd
 from random import SystemRandom
 from sklearn import model_selection
 
+
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu
@@ -37,7 +38,7 @@ from lib.ode_func import ODEFunc, ODEFunc_w_Poisson
 from lib.diffeq_solver import DiffeqSolver
 from mujoco_physics import HopperPhysics
 
-from lib.utils import compute_loss_all_batches
+from lib.utils import compute_loss_all_batches, initialize_gmm_with_kmeans, initialize_gmm_with_kmeans_v
 # Generative model for noisy data based on ODE
 parser = argparse.ArgumentParser('Latent ODE')
 parser.add_argument('-n',  type=int, default=100, help="Size of the dataset")
@@ -61,6 +62,9 @@ parser.add_argument('--quantization', type=float, default=0.1, help="Quantizatio
 	"Value 1 means quantization by 1 hour, value 0.1 means quantization by 0.1 hour = 6 min")
 
 parser.add_argument('--latent-ode', action='store_true', help="Run Latent ODE seq2seq model")
+parser.add_argument('--use_gmm', action='store_true', help="Run Latent ODE with clusters inside latent space model")
+parser.add_argument('--use_flow', action='store_true', help="Run Latent ODE with clusters inside latent space model")
+parser.add_argument('--use_gmm_v', action='store_true', help="Run Latent ODE with clusters inside latent space model")
 parser.add_argument('--z0-encoder', type=str, default='odernn', help="Type of encoder for Latent ODE model: odernn or rnn")
 
 parser.add_argument('--classic-rnn', action='store_true', help="Run RNN baseline: classic RNN that sees true points at every point. Used for interpolation only.")
@@ -72,6 +76,7 @@ parser.add_argument('--ode-rnn', action='store_true', help="Run ODE-RNN baseline
 parser.add_argument('--rnn-vae', action='store_true', help="Run RNN baseline: seq2seq model with sampling of the h0 and ELBO loss.")
 
 parser.add_argument('-l', '--latents', type=int, default=6, help="Size of the latent state")
+parser.add_argument('-nc', '--n_components', type=int, default=4, help="Number of Gaussian within the latent space")
 parser.add_argument('--rec-dims', type=int, default=20, help="Dimensionality of the recognition model (ODE or RNN).")
 
 parser.add_argument('--rec-layers', type=int, default=1, help="Number of layers in ODE func in recognition ODE")
@@ -92,16 +97,8 @@ parser.add_argument('--noise-weight', type=float, default=0.04, help="Noise ampl
 parser.add_argument('--seed', type = int, default = 15, help="Fix seed for reproducibility")
 parser.add_argument('--experiment', type = str, default = None, help="Fix experiment number for reproducibility")
 parser.add_argument('--patience', type=int, default=10000, help='Patience for early stopping')
+
 parser.add_argument('--smoothing_factor', type=float, default=0.01, help='Smoothing factor for EMA of test MSE')
-
-parser.add_argument('--train_datasets', type=str, default='pccp', help='Datasets to use for training, separated by commas')
-parser.add_argument('--test_datasets', type=str, default='pccp', help='Datasets to use for testing, separated by commas')
-parser.add_argument('--train_data_path', type=str, help='Path to the training data file')
-parser.add_argument('--test_data_path', type=str, help='Path to the testing data file')
-parser.add_argument('--pharmac_path', type=str, help='Path to the pharmacokinetics data file')
-parser.add_argument('--auc_path', type=str, help='Path to the AUC data file')
-parser.add_argument('--exp', type=str, default="", help='Experiment ID for gen_tac')
-
 
 args = parser.parse_args()
 
@@ -123,14 +120,7 @@ if __name__ == '__main__':
 		experimentID = int(args.experiment)
 		if experimentID is None:
 			experimentID = int(SystemRandom().random()*100000)
-
-	# Set up the base directory for saving results
-	base_save_path = args.save
-	utils.makedirs(base_save_path)
-
-	# Path for the checkpoint file
-	ckpt_path = os.path.join(base_save_path, "experiment_" + str(experimentID) + '.ckpt')
-
+	ckpt_path = os.path.join(args.save, "experiment_" + str(experimentID) + '.ckpt')
 
 	start = time.time()
 	print("Sampling dataset of {} training examples".format(args.n))
@@ -141,7 +131,7 @@ if __name__ == '__main__':
 		input_command = input_command[:ind] + input_command[(ind+2):]
 	input_command = " ".join(input_command)
 
-	# utils.makedirs("results/")
+	utils.makedirs("results/")
 
 	##################################################################
 	data_obj = parse_datasets(args, device)
@@ -260,15 +250,12 @@ if __name__ == '__main__':
 	if args.load is not None:
 		utils.get_ckpt_model(ckpt_path, model, device)
 		# exit()
-
 	##################################################################
 	# Training
 
-	log_dir = os.path.join(base_save_path, "logs")
-	utils.makedirs(log_dir)
-	log_path = os.path.join(log_dir, file_name + "_" + str(experimentID) + ".log")
-
-
+	log_path = "logs/" + file_name + "_" + str(experimentID) + ".log"
+	if not os.path.exists("logs/"):
+		utils.makedirs("logs/")
 	logger = utils.get_logger(logpath=log_path, filepath=os.path.abspath(__file__))
 	logger.info(input_command)
 
@@ -276,38 +263,99 @@ if __name__ == '__main__':
 
 	num_batches = data_obj["n_train_batches"]
 	
-	tensorboard_log_dir = os.path.join(base_save_path, "runs", str(experimentID))
+	tensorboard_log_dir = os.path.join(args.save, "runs", str(experimentID))
 	writer = SummaryWriter(tensorboard_log_dir)
 	print(f"TensorBoard logs will be saved to: {tensorboard_log_dir}")
+
+print("----------------------------------------------------------------")
+print("Starting GMM Warm-Start Strategy")
+print("Phase 1: Pre-training Encoder on Reconstruction Loss (MSE) only")
+print("----------------------------------------------------------------")
+
+
+if args.use_gmm or args.use_gmm_v or args.use_flow:
+	n_warmup_epochs = 20
+	num_batches = data_obj["n_train_batches"]
+
+	for warm_itr in range(n_warmup_epochs * num_batches):
+		optimizer.zero_grad()
+		utils.update_learning_rate(optimizer, decay_rate=0.999, lowest=args.lr/10)
+		
+		batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
+		
+		# FORCE KL_COEF = 0 so we only optimize MSE (Reconstruction)
+		train_res = model.compute_all_losses(batch_dict, n_traj_samples=3, kl_coef=0.0)
+		
+		# Backward pass
+		train_res["loss"].backward()
+		optimizer.step()
+		
+		if warm_itr % num_batches == 0:
+			print(f"[Warmup] Epoch {warm_itr // num_batches}/{n_warmup_epochs} - MSE: {train_res['mse'].item():.4f}")
+	# 2. Run K-Means Initialization
+	print("----------------------------------------------------------------")
+	print("Phase 2: Initializing GMM Priors with K-Means on Pre-trained Embeddings")
+	print("----------------------------------------------------------------")
+	if args.use_gmm:
+		initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
+	elif args.use_gmm_v: 
+		initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
+	print("----------------------------------------------------------------")
+	print("Phase 3: Starting Full Training (Reconstruction + KL + Diversity)")
+	print("----------------------------------------------------------------")
 
 ### Early Stopping Initialization ###
 # Add this to your argument parser: parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
 patience = args.patience
 smoothing_factor = args.smoothing_factor # e.g., 0.1
 early_stop_counter = 0
-
+unfreeze_epoch = 2000  # Adjustable: Wait until clusters are stable
+unfreeze_iter = unfreeze_epoch * num_batches
 
 smoothed_test_mse = float('inf') # Initialize to infinity for the first EMA calculation
 best_smoothed_test_mse = float('inf') # Tracks the best smoothed MSE encountered
 # Define a path for the best model checkpoint
 best_ckpt_path = ckpt_path.replace('.ckpt', '_best.ckpt')
+
+optimizer = torch.optim.Adamax(model.parameters(), lr=args.lr)
+utils.update_learning_rate(optimizer, decay_rate=1.0, lowest=args.lr) # Reset LR
 ### End of Initialization ###
+
 for itr in range(1, num_batches * (args.niters + 1)):
     optimizer.zero_grad()
     utils.update_learning_rate(optimizer, decay_rate = 0.999, lowest = args.lr / 10)
-
-    wait_until_kl_inc = 10
+    wait_until_kl_inc = 20
+    # model.prior_means.data
     if itr // num_batches < wait_until_kl_inc:
         kl_coef = 0.
     else:
         kl_coef = (1-0.99** (itr // num_batches - wait_until_kl_inc))
+    if itr == unfreeze_iter and args.use_gmm_v:
+        initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
+        model.latent_rotation.weight.requires_grad = True
+        
+        # 2. Add Parametrization (Orthogonality) NOW if you want strict rotation
+        # (Optional but recommended if using the 'Parametrization' method)
+        # torch.nn.utils.parametrizations.orthogonal(model.latent_rotation, "weight")
+        # 3. Re-initialize Optimizer to include the new parameter
+        optimizer = torch.optim.Adamax(model.parameters(), lr=args.lr * 0.1) # Lower LR for fine-tuning
+        
+    # epoch = itr // num_batches
+    # wait_until_kl_inc = 0
+    # max_kl_beta = 20.0 # <--- Cap at 5.0 instead of 1.0
+    
+    # if epoch < wait_until_kl_inc:
+    #     kl_coef = 0.
+    # else:
+    #     # Reaches 5.0 quickly
+    #     kl_coef = min(max_kl_beta, (epoch - wait_until_kl_inc) / 1)
 
     batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
     train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
     train_res["loss"].backward()
     optimizer.step()
 
-    n_iters_to_viz = 1000
+    n_iters_to_viz = 10
     if itr % (n_iters_to_viz * num_batches) == 0:
         with torch.no_grad():
 
@@ -317,11 +365,10 @@ for itr in range(1, num_batches * (args.niters + 1)):
                 experimentID = experimentID,
                 device = device,
                 n_traj_samples = 10, kl_coef = kl_coef, data_obj = data_obj)
-            
             message = 'Epoch {:04d} [Test seq (cond on sampled tp)] | Loss {:.6f} | Likelihood {:.6f} | KL fp {:.4f} | FP STD {:.4f}|'.format(
                 itr//num_batches, 
-                test_res["loss"].detach(), test_res["likelihood"].detach(), 
-                test_res["kl_first_p"], test_res["std_first_p"])
+                test_res["loss"].item(), test_res["likelihood"].item(), 
+                test_res["kl_first_p"].item(), test_res["std_first_p"].item())
         
             logger.info("Experiment " + str(experimentID))
             logger.info(message)

@@ -7,7 +7,7 @@ import os
 import sys
 import matplotlib
 # matplotlib.use('TkAgg')
-matplotlib.use('Agg')
+
 import matplotlib.pyplot
 import matplotlib.pyplot as plt
 import itertools
@@ -53,7 +53,7 @@ from mujoco_physics import HopperPhysics
 from fit_gaussian import generate_with_gmm_prior
 
 from lib.utils import compute_loss_all_batches
-
+matplotlib.use('TkAgg')
 # Generative model for noisy data based on ODE
 parser = argparse.ArgumentParser('Latent ODE')
 parser.add_argument('-n',  type=int, default=100, help="Size of the dataset")
@@ -115,7 +115,7 @@ utils.makedirs(args.save)
 
 #####################################################################################################
 
-if __name__ == '__main__':  
+def generate_reconstruct():
     experimentID = args.load
     if experimentID is None:
         # Make a new experiment ID
@@ -257,13 +257,8 @@ if __name__ == '__main__':
             all_latent_z0_var.append(latent_z0_var.squeeze(0))
             all_data.append(data)
             all_reconstructions.append(reconstructions)
-    all_latent_z0_means = np.concatenate(all_latent_z0_means, axis=0)
-    all_latent_z0_var = np.concatenate(all_latent_z0_var, axis=0)
 
-    NUM_COMPONENTS = 2 # Example: maybe you have 5 distinct types of data
-    # means_z0 = torch.zeros(10)
-    # sigma_z0 = torch.ones(10)
-    samples = generate_with_gmm_prior(all_latent_z0_means, n_components=NUM_COMPONENTS, num_samples = 10000)
+    samples = generate_with_gmm_prior(all_latent_z0_means, n_components=4, num_samples = 10000)
     n_traj_samples = len(samples[0])
     mean = torch.mean(samples)
     std = torch.std(samples)
@@ -271,123 +266,14 @@ if __name__ == '__main__':
     # samples = to_sample.sample([n_traj_samples, 1, args.l]).squeeze(-1)
     # samples = (torch.randn(1, n_traj_samples, 10)* std) +mean # 10 being the dimension of the latent space
     time_steps_to_predict = utils.linspace_vector(torch.tensor(0.0), torch.tensor(24.), 100).to(device)
+    time_steps_to_predict = torch.arange(0.5, 168.0 + 0.1, 0.1, device=device)
     sol_y = model.diffeq_solver(samples.unsqueeze(0), time_steps_to_predict)
     pred_x = model.decoder(sol_y)
-    # test = model.sample_traj_from_prior(time_steps_to_predict, n_traj_samples = 100)
-    # test = test.detach().numpy()
     scaling_factor = data_obj['max_out']['max_out'][0]
     if 'best_lambda' in data_obj['max_out'].keys():
         new_test = inv_boxcox(pred_x.detach().numpy(), data_obj['max_out']['best_lambda'][0])
         new_test = new_test*scaling_factor
         data = inv_boxcox(data, data_obj['max_out']['best_lambda'][0])
-        reconstructions = inv_boxcox(reconstructions, data_obj['max_out']['best_lambda'][0])
-        reconstructions = torch.nan_to_num(reconstructions, nan=0.0)
-        reconstructions = reconstructions.detach().numpy()*scaling_factor
-        reconstructions = np.mean(reconstructions[:, :, :], axis=0)
+        import pdb; pdb.set_trace()
     # all_latent_z0_means = samples
-    reconstructions = np.concatenate((reconstructions.squeeze(-1), new_test.squeeze(0).squeeze(-1)), axis = 0)
-    print("Step 1: Running UMAP on the latent means...")
-    mapper = umap.UMAP(
-        n_neighbors=20,          # How many neighbors to consider for local structure
-        min_dist=0.1,            # How tightly to pack points together
-        n_components=2,          # Target dimensions
-        random_state=42,
-    ).fit(all_latent_z0_means)
-    pca = PCA(n_components=2)
-    latent_means_pca = pca.fit(all_latent_z0_means)
-    embedding_real = pca.transform(all_latent_z0_means)
-    embedding = pca.transform(samples)
-    # all_latent_z0_means = samples
-    print("UMAP embedding created.")
-    # Step 2: Pre-generate plot images for hover tooltips
-    print("Step 2: Generating time-series plot images for each data point...")
-    hover_images = []
-    num_samples = samples.shape[0]
-    ts_to_predict = time_steps_to_predict.cpu().numpy()
-    # Step 3: Prepare data for Plotly using a Pandas DataFrame
-    print("Step 3: Assembling data into a DataFrame for Plotly...")
-    embedding = np.concatenate((embedding_real, embedding), axis = 0)
-    df = pd.DataFrame({
-        'x': embedding[:, 0],
-        'y': embedding[:, 1],
-        'label': np.concatenate((np.array(all_labels).squeeze(0)*2-1, np.zeros(num_samples))),
-        'patient_id': np.arange(num_samples + len(all_latent_z0_means)),
-    })
-    # Step 4: Create the interactive scatter plot
-    print("Step 4: Building the interactive figure...")
-    fig_interactive = go.Figure()
-    # Define the hover template. This is HTML that tells Plotly what to show.
-    hovertemplate = """
-    <b>Patient ID:</b> %{customdata[0]}<br>
-    <b>Label Value:</b> %{customdata[1]:.3f}<br><br>
-    %{customdata[2]}
-    <extra></extra>
-    """ # <extra></extra> hides the trace name
-    # Helper function to generate a plot and convert it to a Base64 image URL
-    def plot_to_base64_url(index):
-        """Generates a PNG of the time series plot for a given index and returns a data URL."""
-        fig_hover, ax_hover = plt.subplots(figsize=(4, 2.5), dpi=100)
-        # Get the data for the specific patient
-        reconstruction_mean = reconstructions[index, :]
-        
-        ax_hover.plot(ts_to_predict, reconstruction_mean, label='Reconstruction', color='red')
-        # try:
-        #     ground_truth = data[index, :, 0]
-        #     ax_hover.plot(time_steps, ground_truth, label='Ground Truth', color='black', linestyle='--')
-        # except:
-        #     pass
-        ax_hover.set_title(f'Patient ID: {df.iloc[index]["patient_id"]}', fontsize=10)
-        ax_hover.set_xlabel('Time', fontsize=8)
-        ax_hover.set_ylabel('Value', fontsize=8)
-        ax_hover.legend(fontsize=8)
-        ax_hover.grid(True, alpha=0.5)
-        plt.tight_layout()
-        # Save plot to an in-memory buffer and encode it
-        buf = io.BytesIO()
-        fig_hover.savefig(buf, format="png")
-        plt.close(fig_hover) # IMPORTANT: Close figure to free memory
-        
-        encoded_image = base64.b64encode(buf.getvalue()).decode('utf-8')
-        return f"data:image/png;base64,{encoded_image}"
-    fig = go.Figure(data=[go.Scatter(
-        x=df['x'], y=df['y'], mode='markers',
-        marker=dict(color=df['label'], colorscale='RdBu_r', showscale=True, colorbar_title='Label Value', size=8)
-    )])
-    fig.update_traces(hoverinfo="none", hovertemplate=None)
-    fig.update_layout(title='Interactive UMAP of Latent Space (Hover for Details and Plots)')
-    app = Dash(__name__)
-    app.layout = html.Div([
-        # The graph component
-        dcc.Graph(id="umap-graph", figure=fig, clear_on_unhover=True),
-        # The custom tooltip component
-        dcc.Tooltip(id="graph-tooltip"),
-    ])
-    # Define the callback to update the tooltip
-    @app.callback(
-        Output("graph-tooltip", "show"),
-        Output("graph-tooltip", "bbox"),
-        Output("graph-tooltip", "children"),
-        Input("umap-graph", "hoverData"),
-    )
-    def display_hover_plot(hoverData):
-        # If not hovering, hide the tooltip
-        if hoverData is None:
-            return False, no_update, no_update
-        # Get the index and bounding box of the hovered point
-        hover_point = hoverData["points"][0]
-        bbox = hover_point["bbox"]
-        point_index = hover_point["pointNumber"]
-        # Generate the plot for the hovered point
-        image_url = plot_to_base64_url(point_index)
-        patient_info = df.iloc[point_index]
-        # Define the content of the tooltip
-        children = html.Div([
-            html.Img(src=image_url, style={"width": "100%"}),
-            html.Hr(),
-            html.P(f"Patient ID: {patient_info['patient_id']}"),
-            html.P(f"Label Value: {patient_info['label']:.3f}"),
-        ], style={'width': '300px', 'white-space': 'normal'})
-        return True, bbox, children
-    print("Step 5: Displaying the interactive plot. You can zoom, pan, and hover!")
-    # This will open in your browser or display in a notebook
-    app.run(port=8051)
+    return new_test[-241:], time_steps_to_predict[-241:]
