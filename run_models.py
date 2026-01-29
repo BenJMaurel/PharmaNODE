@@ -53,13 +53,13 @@ parser.add_argument('-r', '--random-seed', type=int, default=1991, help="Random_
 
 parser.add_argument('--dataset', type=str, default='periodic', help="Dataset to load. Available: physionet, activity, hopper, periodic")
 parser.add_argument('-s', '--sample-tp', type=float, default=None, help="Number of time points to sub-sample."
-	"If > 1, subsample exact number of points. If the number is in [0,1], take a percentage of available points per time series. If None, do not subsample")
+    "If > 1, subsample exact number of points. If the number is in [0,1], take a percentage of available points per time series. If None, do not subsample")
 
 parser.add_argument('-c', '--cut-tp', type=int, default=None, help="Cut out the section of the timeline of the specified length (in number of points)."
-	"Used for periodic function demo.")
+    "Used for periodic function demo.")
 
 parser.add_argument('--quantization', type=float, default=0.1, help="Quantization on the physionet dataset."
-	"Value 1 means quantization by 1 hour, value 0.1 means quantization by 0.1 hour = 6 min")
+    "Value 1 means quantization by 1 hour, value 0.1 means quantization by 0.1 hour = 6 min")
 
 parser.add_argument('--latent-ode', action='store_true', help="Run Latent ODE seq2seq model")
 parser.add_argument('--use_gmm', action='store_true', help="Run Latent ODE with clusters inside latent space model")
@@ -109,160 +109,160 @@ utils.makedirs(args.save)
 #####################################################################################################
 
 if __name__ == '__main__':
-	torch.manual_seed(args.seed)
-	seed = np.random.seed(args.seed)
-	experimentID = args.load
+    torch.manual_seed(args.seed)
+    seed = np.random.seed(args.seed)
+    experimentID = args.load
 
-	if experimentID is None:
-		# Make a new experiment ID
-		experimentID = int(args.experiment)
-		if experimentID is None:
-			experimentID = int(SystemRandom().random()*100000)
-	ckpt_path = os.path.join(args.save, "experiment_" + str(experimentID) + '.ckpt')
+    if experimentID is None:
+        # Make a new experiment ID
+        experimentID = int(args.experiment)
+        if experimentID is None:
+            experimentID = int(SystemRandom().random()*100000)
+    ckpt_path = os.path.join(args.save, "experiment_" + str(experimentID) + '.ckpt')
 
-	start = time.time()
-	print("Sampling dataset of {} training examples".format(args.n))
-	input_command = sys.argv
-	ind = [i for i in range(len(input_command)) if input_command[i] == "--load"]
-	if len(ind) == 1:
-		ind = ind[0]
-		input_command = input_command[:ind] + input_command[(ind+2):]
-	input_command = " ".join(input_command)
+    start = time.time()
+    print("Sampling dataset of {} training examples".format(args.n))
+    input_command = sys.argv
+    ind = [i for i in range(len(input_command)) if input_command[i] == "--load"]
+    if len(ind) == 1:
+        ind = ind[0]
+        input_command = input_command[:ind] + input_command[(ind+2):]
+    input_command = " ".join(input_command)
 
-	utils.makedirs("results/")
+    utils.makedirs("results/")
 
-	##################################################################
-	data_obj = parse_datasets(args, device)
-	input_dim = data_obj["input_dim"]
+    ##################################################################
+    data_obj = parse_datasets(args, device)
+    input_dim = data_obj["input_dim"]
 
-	classif_per_tp = False
-	if ("classif_per_tp" in data_obj):
-		# do classification per time point rather than on a time series as a whole
-		classif_per_tp = data_obj["classif_per_tp"]
+    classif_per_tp = False
+    if ("classif_per_tp" in data_obj):
+        # do classification per time point rather than on a time series as a whole
+        classif_per_tp = data_obj["classif_per_tp"]
 
-	if args.classif and (args.dataset == "hopper" or args.dataset == "periodic"):
-		raise Exception("Classification task is not available for MuJoCo and 1d datasets")
+    if args.classif and (args.dataset == "hopper" or args.dataset == "periodic"):
+        raise Exception("Classification task is not available for MuJoCo and 1d datasets")
 
-	n_labels = 1
-	if args.classif:
-		if ("n_labels" in data_obj):
-			n_labels = data_obj["n_labels"]
-		else:
-			raise Exception("Please provide number of labels for classification task")
+    n_labels = 1
+    if args.classif:
+        if ("n_labels" in data_obj):
+            n_labels = data_obj["n_labels"]
+        else:
+            raise Exception("Please provide number of labels for classification task")
 
-	##################################################################
-	# Create the model
-	obsrv_std = 0.01
-	if args.dataset == "hopper":
-		obsrv_std = 1e-3 
+    ##################################################################
+    # Create the model
+    obsrv_std = 0.01
+    if args.dataset == "hopper":
+        obsrv_std = 1e-3
 
-	obsrv_std = torch.Tensor([obsrv_std]).to(device)
+    obsrv_std = torch.Tensor([obsrv_std]).to(device)
 
-	z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
+    z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
 
-	if args.rnn_vae:
-		if args.poisson:
-			print("Poisson process likelihood not implemented for RNN-VAE: ignoring --poisson")
+    if args.rnn_vae:
+        if args.poisson:
+            print("Poisson process likelihood not implemented for RNN-VAE: ignoring --poisson")
 
-		# Create RNN-VAE model
-		model = RNN_VAE(input_dim, args.latents, 
-			device = device, 
-			rec_dims = args.rec_dims, 
-			concat_mask = True, 
-			obsrv_std = obsrv_std,
-			z0_prior = z0_prior,
-			use_binary_classif = args.classif,
-			classif_per_tp = classif_per_tp,
-			linear_classifier = args.linear_classif,
-			n_units = args.units,
-			input_space_decay = args.input_decay,
-			cell = args.rnn_cell,
-			n_labels = n_labels,
-			train_classif_w_reconstr = (args.dataset == "physionet")
-			).to(device)
+        # Create RNN-VAE model
+        model = RNN_VAE(input_dim, args.latents,
+            device = device,
+            rec_dims = args.rec_dims,
+            concat_mask = True,
+            obsrv_std = obsrv_std,
+            z0_prior = z0_prior,
+            use_binary_classif = args.classif,
+            classif_per_tp = classif_per_tp,
+            linear_classifier = args.linear_classif,
+            n_units = args.units,
+            input_space_decay = args.input_decay,
+            cell = args.rnn_cell,
+            n_labels = n_labels,
+            train_classif_w_reconstr = (args.dataset == "physionet")
+            ).to(device)
 
 
-	elif args.classic_rnn:
-		if args.poisson:
-			print("Poisson process likelihood not implemented for RNN: ignoring --poisson")
+    elif args.classic_rnn:
+        if args.poisson:
+            print("Poisson process likelihood not implemented for RNN: ignoring --poisson")
 
-		if args.extrap:
-			raise Exception("Extrapolation for standard RNN not implemented")
-		# Create RNN model
-		model = Classic_RNN(input_dim, args.latents, device, 
-			concat_mask = True, obsrv_std = obsrv_std,
-			n_units = args.units,
-			use_binary_classif = args.classif,
-			classif_per_tp = classif_per_tp,
-			linear_classifier = args.linear_classif,
-			input_space_decay = args.input_decay,
-			cell = args.rnn_cell,
-			n_labels = n_labels,
-			train_classif_w_reconstr = (args.dataset == "physionet")
-			).to(device)
-	elif args.ode_rnn:
-		# Create ODE-GRU model
-		n_ode_gru_dims = args.latents
-				
-		if args.poisson:
-			print("Poisson process likelihood not implemented for ODE-RNN: ignoring --poisson")
+        if args.extrap:
+            raise Exception("Extrapolation for standard RNN not implemented")
+        # Create RNN model
+        model = Classic_RNN(input_dim, args.latents, device,
+            concat_mask = True, obsrv_std = obsrv_std,
+            n_units = args.units,
+            use_binary_classif = args.classif,
+            classif_per_tp = classif_per_tp,
+            linear_classifier = args.linear_classif,
+            input_space_decay = args.input_decay,
+            cell = args.rnn_cell,
+            n_labels = n_labels,
+            train_classif_w_reconstr = (args.dataset == "physionet")
+            ).to(device)
+    elif args.ode_rnn:
+        # Create ODE-GRU model
+        n_ode_gru_dims = args.latents
 
-		if args.extrap:
-			raise Exception("Extrapolation for ODE-RNN not implemented")
+        if args.poisson:
+            print("Poisson process likelihood not implemented for ODE-RNN: ignoring --poisson")
 
-		ode_func_net = utils.create_net(n_ode_gru_dims, n_ode_gru_dims, 
-			n_layers = args.rec_layers, n_units = args.units, nonlinear = nn.Tanh)
+        if args.extrap:
+            raise Exception("Extrapolation for ODE-RNN not implemented")
 
-		rec_ode_func = ODEFunc(
-			input_dim = input_dim, 
-			latent_dim = n_ode_gru_dims,
-			ode_func_net = ode_func_net,
-			device = device).to(device)
+        ode_func_net = utils.create_net(n_ode_gru_dims, n_ode_gru_dims,
+            n_layers = args.rec_layers, n_units = args.units, nonlinear = nn.Tanh)
 
-		z0_diffeq_solver = DiffeqSolver(input_dim, rec_ode_func, "euler", args.latents, 
-			odeint_rtol = 1e-3, odeint_atol = 1e-4, device = device)
-	
-		model = ODE_RNN(input_dim, n_ode_gru_dims, device = device, 
-			z0_diffeq_solver = z0_diffeq_solver, n_gru_units = args.gru_units,
-			concat_mask = True, obsrv_std = obsrv_std,
-			use_binary_classif = args.classif,
-			classif_per_tp = classif_per_tp,
-			n_labels = n_labels,
-			train_classif_w_reconstr = (args.dataset == "physionet")
-			).to(device)
-	elif args.latent_ode:
-		model = create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device, 
-			classif_per_tp = classif_per_tp,
-			n_labels = n_labels)
-	else:
-		raise Exception("Model not specified")
+        rec_ode_func = ODEFunc(
+            input_dim = input_dim,
+            latent_dim = n_ode_gru_dims,
+            ode_func_net = ode_func_net,
+            device = device).to(device)
 
-	##################################################################
+        z0_diffeq_solver = DiffeqSolver(input_dim, rec_ode_func, "euler", args.latents,
+            odeint_rtol = 1e-3, odeint_atol = 1e-4, device = device)
 
-	if args.viz:
-		viz = Visualizations(device)
+        model = ODE_RNN(input_dim, n_ode_gru_dims, device = device,
+            z0_diffeq_solver = z0_diffeq_solver, n_gru_units = args.gru_units,
+            concat_mask = True, obsrv_std = obsrv_std,
+            use_binary_classif = args.classif,
+            classif_per_tp = classif_per_tp,
+            n_labels = n_labels,
+            train_classif_w_reconstr = (args.dataset == "physionet")
+            ).to(device)
+    elif args.latent_ode:
+        model = create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device,
+            classif_per_tp = classif_per_tp,
+            n_labels = n_labels)
+    else:
+        raise Exception("Model not specified")
 
-	##################################################################
-	
-	#Load checkpoint and evaluate the model
-	if args.load is not None:
-		utils.get_ckpt_model(ckpt_path, model, device)
-	##################################################################
-	# Training
+    ##################################################################
 
-	log_path = "logs/" + file_name + "_" + str(experimentID) + ".log"
-	if not os.path.exists("logs/"):
-		utils.makedirs("logs/")
-	logger = utils.get_logger(logpath=log_path, filepath=os.path.abspath(__file__))
-	logger.info(input_command)
+    if args.viz:
+        viz = Visualizations(device)
 
-	optimizer = optim.Adamax(model.parameters(), lr=args.lr)
+    ##################################################################
 
-	num_batches = data_obj["n_train_batches"]
-	
-	tensorboard_log_dir = os.path.join(args.save, "runs", str(experimentID))
-	writer = SummaryWriter(tensorboard_log_dir)
-	print(f"TensorBoard logs will be saved to: {tensorboard_log_dir}")
+    #Load checkpoint and evaluate the model
+    if args.load is not None:
+        utils.get_ckpt_model(ckpt_path, model, device)
+    ##################################################################
+    # Training
+
+    log_path = "logs/" + file_name + "_" + str(experimentID) + ".log"
+    if not os.path.exists("logs/"):
+        utils.makedirs("logs/")
+    logger = utils.get_logger(logpath=log_path, filepath=os.path.abspath(__file__))
+    logger.info(input_command)
+
+    optimizer = optim.Adamax(model.parameters(), lr=args.lr)
+
+    num_batches = data_obj["n_train_batches"]
+
+    tensorboard_log_dir = os.path.join(args.save, "runs", str(experimentID))
+    writer = SummaryWriter(tensorboard_log_dir)
+    print(f"TensorBoard logs will be saved to: {tensorboard_log_dir}")
 
 print("----------------------------------------------------------------")
 print("Starting GMM Warm-Start Strategy")
@@ -271,35 +271,35 @@ print("----------------------------------------------------------------")
 
 
 if args.use_gmm or args.use_gmm_v or args.use_flow:
-	n_warmup_epochs = 20
-	num_batches = data_obj["n_train_batches"]
+    n_warmup_epochs = 20
+    num_batches = data_obj["n_train_batches"]
 
-	for warm_itr in range(n_warmup_epochs * num_batches):
-		optimizer.zero_grad()
-		utils.update_learning_rate(optimizer, decay_rate=0.999, lowest=args.lr/10)
-		
-		batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
-		
-		# FORCE KL_COEF = 0 so we only optimize MSE (Reconstruction)
-		train_res = model.compute_all_losses(batch_dict, n_traj_samples=3, kl_coef=0.0)
-		
-		# Backward pass
-		train_res["loss"].backward()
-		optimizer.step()
-		
-		if warm_itr % num_batches == 0:
-			print(f"[Warmup] Epoch {warm_itr // num_batches}/{n_warmup_epochs} - MSE: {train_res['mse'].item():.4f}")
-	# 2. Run K-Means Initialization
-	print("----------------------------------------------------------------")
-	print("Phase 2: Initializing GMM Priors with K-Means on Pre-trained Embeddings")
-	print("----------------------------------------------------------------")
-	if args.use_gmm:
-		initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
-	elif args.use_gmm_v: 
-		initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
-	print("----------------------------------------------------------------")
-	print("Phase 3: Starting Full Training (Reconstruction + KL + Diversity)")
-	print("----------------------------------------------------------------")
+    for warm_itr in range(n_warmup_epochs * num_batches):
+        optimizer.zero_grad()
+        utils.update_learning_rate(optimizer, decay_rate=0.999, lowest=args.lr/10)
+
+        batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
+
+        # FORCE KL_COEF = 0 so we only optimize MSE (Reconstruction)
+        train_res = model.compute_all_losses(batch_dict, n_traj_samples=3, kl_coef=0.0)
+
+        # Backward pass
+        train_res["loss"].backward()
+        optimizer.step()
+
+        if warm_itr % num_batches == 0:
+            print(f"[Warmup] Epoch {warm_itr // num_batches}/{n_warmup_epochs} - MSE: {train_res['mse'].item():.4f}")
+    # 2. Run K-Means Initialization
+    print("----------------------------------------------------------------")
+    print("Phase 2: Initializing GMM Priors with K-Means on Pre-trained Embeddings")
+    print("----------------------------------------------------------------")
+    if args.use_gmm:
+        initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
+    elif args.use_gmm_v:
+        initialize_gmm_with_kmeans(model, data_obj, device, n_batches=data_obj["n_test_batches"])
+    print("----------------------------------------------------------------")
+    print("Phase 3: Starting Full Training (Reconstruction + KL + Diversity)")
+    print("----------------------------------------------------------------")
 
 ### Early Stopping Initialization ###
 # Add this to your argument parser: parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')

@@ -21,12 +21,15 @@ import torch.distributions as D
 import torch.nn.utils.parametrizations as parametrizations
 
 def create_classifier(z0_dim, n_labels):
-	return nn.Sequential(
-			nn.Linear(z0_dim, 300),
-			nn.ReLU(),
-			nn.Linear(300, 300),
-			nn.ReLU(),
-			nn.Linear(300, n_labels),)
+    """
+    Creates a simple Multi-Layer Perceptron (MLP) classifier.
+    """
+    return nn.Sequential(
+            nn.Linear(z0_dim, 300),
+            nn.ReLU(),
+            nn.Linear(300, 300),
+            nn.ReLU(),
+            nn.Linear(300, n_labels),)
 
 class CouplingLayer(nn.Module):
     """
@@ -50,8 +53,10 @@ class CouplingLayer(nn.Module):
         )
 
     def forward(self, x):
-        # Forward mapping: u -> z (Base to Latent)
-        # Used for Sampling
+        """
+        Forward mapping: u -> z (Base to Latent)
+        Used for Sampling
+        """
         mx = x * self.mask
         s = self.s_net(mx) * (1 - self.mask)
         t = self.t_net(mx) * (1 - self.mask)
@@ -66,8 +71,10 @@ class CouplingLayer(nn.Module):
         return z, log_det_jacobian
 
     def inverse(self, z):
-        # Inverse mapping: z -> u (Latent to Base)
-        # Used for Density Estimation (Training)
+        """
+        Inverse mapping: z -> u (Latent to Base)
+        Used for Density Estimation (Training)
+        """
         mz = z * self.mask
         s = self.s_net(mz) * (1 - self.mask)
         t = self.t_net(mz) * (1 - self.mask)
@@ -96,7 +103,9 @@ class RealNVP(nn.Module):
             self.layers.append(CouplingLayer(latent_dim, hidden_dim, mask))
 
     def forward(self, u):
-        # Base (Gaussian) -> Latent (Complex)
+        """
+        Base (Gaussian) -> Latent (Complex)
+        """
         log_det_sum = 0
         z = u
         for layer in self.layers:
@@ -105,8 +114,10 @@ class RealNVP(nn.Module):
         return z, log_det_sum
 
     def inverse(self, z):
-        # Latent (Complex) -> Base (Gaussian)
-        # We process layers in REVERSE order for inverse
+        """
+        Latent (Complex) -> Base (Gaussian)
+        We process layers in REVERSE order for inverse
+        """
         log_det_sum = 0
         u = z
         for layer in reversed(self.layers):
@@ -116,349 +127,367 @@ class RealNVP(nn.Module):
 
 
 class Baseline(nn.Module):
-	def __init__(self, input_dim, latent_dim, device, 
-		obsrv_std = 0.01, use_binary_classif = False,
-		classif_per_tp = False,
-		use_poisson_proc = False,
-		linear_classifier = False,
-		n_labels = 1,
-		train_classif_w_reconstr = False):
-		super(Baseline, self).__init__()
+    def __init__(self, input_dim, latent_dim, device,
+        obsrv_std = 0.01, use_binary_classif = False,
+        classif_per_tp = False,
+        use_poisson_proc = False,
+        linear_classifier = False,
+        n_labels = 1,
+        train_classif_w_reconstr = False):
+        super(Baseline, self).__init__()
 
-		self.input_dim = input_dim
-		self.latent_dim = latent_dim
-		self.n_labels = n_labels
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.n_labels = n_labels
 
-		self.obsrv_std = torch.Tensor([obsrv_std]).to(device)
-		self.device = device
+        self.obsrv_std = torch.Tensor([obsrv_std]).to(device)
+        self.device = device
 
-		self.use_binary_classif = use_binary_classif
-		self.classif_per_tp = classif_per_tp
-		self.use_poisson_proc = use_poisson_proc
-		self.linear_classifier = linear_classifier
-		self.train_classif_w_reconstr = train_classif_w_reconstr
+        self.use_binary_classif = use_binary_classif
+        self.classif_per_tp = classif_per_tp
+        self.use_poisson_proc = use_poisson_proc
+        self.linear_classifier = linear_classifier
+        self.train_classif_w_reconstr = train_classif_w_reconstr
 
-		z0_dim = latent_dim
-		if use_poisson_proc:
-			z0_dim += latent_dim
+        z0_dim = latent_dim
+        if use_poisson_proc:
+            z0_dim += latent_dim
 
-		if use_binary_classif: 
-			if linear_classifier:
-				self.classifier = nn.Sequential(
-					nn.Linear(z0_dim, n_labels))
-			else:
-				self.classifier = create_classifier(z0_dim, n_labels)
-			utils.init_network_weights(self.classifier)
-
-
-	def get_gaussian_likelihood(self, truth, pred_y, mask = None):
-		# pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
-		# truth shape  [n_traj, n_tp, n_dim]
-		if mask is not None:
-			mask = mask.repeat(pred_y.size(0), 1, 1, 1)
-
-		# Compute likelihood of the data under the predictions
-		log_density_data = masked_gaussian_log_density(pred_y, truth, 
-			obsrv_std = self.obsrv_std, mask = mask)
-		log_density_data = log_density_data.permute(1,0)
-
-		# Compute the total density
-		# Take mean over n_traj_samples
-		log_density = torch.mean(log_density_data, 0)
-
-		# shape: [n_traj]
-		return log_density
+        if use_binary_classif:
+            if linear_classifier:
+                self.classifier = nn.Sequential(
+                    nn.Linear(z0_dim, n_labels))
+            else:
+                self.classifier = create_classifier(z0_dim, n_labels)
+            utils.init_network_weights(self.classifier)
 
 
-	def get_mse(self, truth, pred_y, mask = None):
-		# pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
-		# truth shape  [n_traj, n_tp, n_dim]
-		if mask is not None:
-			mask = mask.repeat(pred_y.size(0), 1, 1, 1)
+    def get_gaussian_likelihood(self, truth, pred_y, mask = None):
+        """
+        Compute Gaussian likelihood of the data under the predictions.
+        """
+        # pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
+        # truth shape  [n_traj, n_tp, n_dim]
+        if mask is not None:
+            mask = mask.repeat(pred_y.size(0), 1, 1, 1)
 
-		# Compute likelihood of the data under the predictions
-		log_density_data = compute_mse(pred_y, truth, mask = mask)
-		# shape: [1]
-		return torch.mean(log_density_data)
+        # Compute likelihood of the data under the predictions
+        log_density_data = masked_gaussian_log_density(pred_y, truth,
+            obsrv_std = self.obsrv_std, mask = mask)
+        log_density_data = log_density_data.permute(1,0)
+
+        # Compute the total density
+        # Take mean over n_traj_samples
+        log_density = torch.mean(log_density_data, 0)
+
+        # shape: [n_traj]
+        return log_density
 
 
-	def compute_all_losses(self, batch_dict,
-		n_tp_to_sample = None, n_traj_samples = 1, kl_coef = 1.):
-		
-		# Condition on subsampled points
-		# Make predictions for all the points
-		pred_x, info = self.get_reconstruction(batch_dict["tp_to_predict"], 
-			batch_dict["observed_data"], batch_dict["observed_tp"], 
-			mask = batch_dict["observed_mask"], dose = batch_dict['dose'], static = batch_dict['static'], n_traj_samples = n_traj_samples,
-			mode = batch_dict["mode"])
+    def get_mse(self, truth, pred_y, mask = None):
+        """
+        Compute MSE of the data under the predictions.
+        """
+        # pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
+        # truth shape  [n_traj, n_tp, n_dim]
+        if mask is not None:
+            mask = mask.repeat(pred_y.size(0), 1, 1, 1)
 
-		# Compute likelihood of all the points
-		likelihood = self.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_x,
-			mask = batch_dict["mask_predicted_data"])
+        # Compute likelihood of the data under the predictions
+        log_density_data = compute_mse(pred_y, truth, mask = mask)
+        # shape: [1]
+        return torch.mean(log_density_data)
 
-		mse = self.get_mse(batch_dict["data_to_predict"], pred_x,
-			mask = batch_dict["mask_predicted_data"])
-		
-		################################
-		# Compute CE loss for binary classification on Physionet
-		# Use only last attribute -- mortatility in the hospital 
-		device = get_device(batch_dict["data_to_predict"])
-		ce_loss = torch.Tensor([0.]).to(device)
-		
-		if (batch_dict["labels"] is not None) and self.use_binary_classif:
-			if (batch_dict["labels"].size(-1) == 1) or (len(batch_dict["labels"].size()) == 1):
-				ce_loss = compute_binary_CE_loss(
-					info["label_predictions"], 
-					batch_dict["labels"])
-			else:
-				ce_loss = compute_multiclass_CE_loss(
-					info["label_predictions"], 
-					batch_dict["labels"],
-					mask = batch_dict["mask_predicted_data"])
 
-			if torch.isnan(ce_loss):
-				print("label pred")
-				print(info["label_predictions"])
-				print("labels")
-				print( batch_dict["labels"])
-				raise Exception("CE loss is Nan!")
+    def compute_all_losses(self, batch_dict,
+        n_tp_to_sample = None, n_traj_samples = 1, kl_coef = 1.):
+        """
+        Computes the reconstruction loss, MSE, and classification loss (if applicable).
+        """
 
-		pois_log_likelihood = torch.Tensor([0.]).to(get_device(batch_dict["data_to_predict"]))
-		if self.use_poisson_proc:
-			pois_log_likelihood = compute_poisson_proc_likelihood(
-				batch_dict["data_to_predict"], pred_x, 
-				info, mask = batch_dict["mask_predicted_data"])
-			# Take mean over n_traj
-			pois_log_likelihood = torch.mean(pois_log_likelihood, 1)
+        # Condition on subsampled points
+        # Make predictions for all the points
+        pred_x, info = self.get_reconstruction(batch_dict["tp_to_predict"],
+            batch_dict["observed_data"], batch_dict["observed_tp"],
+            mask = batch_dict["observed_mask"], dose = batch_dict['dose'], static = batch_dict['static'], n_traj_samples = n_traj_samples,
+            mode = batch_dict["mode"])
 
-		loss = - torch.mean(likelihood)
+        # Compute likelihood of all the points
+        likelihood = self.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_x,
+            mask = batch_dict["mask_predicted_data"])
 
-		if self.use_poisson_proc:
-			loss = loss - 0.1 * pois_log_likelihood 
+        mse = self.get_mse(batch_dict["data_to_predict"], pred_x,
+            mask = batch_dict["mask_predicted_data"])
 
-		if self.use_binary_classif:
-			if self.train_classif_w_reconstr:
-				loss = loss +  ce_loss * 100
-			else:
-				loss =  ce_loss
+        ################################
+        # Compute CE loss for binary classification on Physionet
+        # Use only last attribute -- mortatility in the hospital
+        device = get_device(batch_dict["data_to_predict"])
+        ce_loss = torch.Tensor([0.]).to(device)
 
-		# Take mean over the number of samples in a batch
-		results = {}
-		results["loss"] = torch.mean(loss)
-		results["likelihood"] = torch.mean(likelihood).detach()
-		results["mse"] = torch.mean(mse).detach()
-		results["pois_likelihood"] = torch.mean(pois_log_likelihood).detach()
-		results["ce_loss"] = torch.mean(ce_loss).detach()
-		results["kl"] = 0.
-		results["kl_first_p"] =  0.
-		results["std_first_p"] = 0.
+        if (batch_dict["labels"] is not None) and self.use_binary_classif:
+            if (batch_dict["labels"].size(-1) == 1) or (len(batch_dict["labels"].size()) == 1):
+                ce_loss = compute_binary_CE_loss(
+                    info["label_predictions"],
+                    batch_dict["labels"])
+            else:
+                ce_loss = compute_multiclass_CE_loss(
+                    info["label_predictions"],
+                    batch_dict["labels"],
+                    mask = batch_dict["mask_predicted_data"])
 
-		if batch_dict["labels"] is not None and self.use_binary_classif:
-			results["label_predictions"] = info["label_predictions"].detach()
-		return results
+            if torch.isnan(ce_loss):
+                print("label pred")
+                print(info["label_predictions"])
+                print("labels")
+                print( batch_dict["labels"])
+                raise Exception("CE loss is Nan!")
+
+        pois_log_likelihood = torch.Tensor([0.]).to(get_device(batch_dict["data_to_predict"]))
+        if self.use_poisson_proc:
+            pois_log_likelihood = compute_poisson_proc_likelihood(
+                batch_dict["data_to_predict"], pred_x,
+                info, mask = batch_dict["mask_predicted_data"])
+            # Take mean over n_traj
+            pois_log_likelihood = torch.mean(pois_log_likelihood, 1)
+
+        loss = - torch.mean(likelihood)
+
+        if self.use_poisson_proc:
+            loss = loss - 0.1 * pois_log_likelihood
+
+        if self.use_binary_classif:
+            if self.train_classif_w_reconstr:
+                loss = loss +  ce_loss * 100
+            else:
+                loss =  ce_loss
+
+        # Take mean over the number of samples in a batch
+        results = {}
+        results["loss"] = torch.mean(loss)
+        results["likelihood"] = torch.mean(likelihood).detach()
+        results["mse"] = torch.mean(mse).detach()
+        results["pois_likelihood"] = torch.mean(pois_log_likelihood).detach()
+        results["ce_loss"] = torch.mean(ce_loss).detach()
+        results["kl"] = 0.
+        results["kl_first_p"] =  0.
+        results["std_first_p"] = 0.
+
+        if batch_dict["labels"] is not None and self.use_binary_classif:
+            results["label_predictions"] = info["label_predictions"].detach()
+        return results
 
 
 
 class VAE_Baseline(nn.Module):
-	def __init__(self, input_dim, latent_dim, 
-		z0_prior, device,
-		obsrv_std = 0.01, 
-		use_binary_classif = False,
-		classif_per_tp = False,
-		use_poisson_proc = False,
-		linear_classifier = False,
-		n_labels = 1,
-		train_classif_w_reconstr = False):
+    def __init__(self, input_dim, latent_dim,
+        z0_prior, device,
+        obsrv_std = 0.01,
+        use_binary_classif = False,
+        classif_per_tp = False,
+        use_poisson_proc = False,
+        linear_classifier = False,
+        n_labels = 1,
+        train_classif_w_reconstr = False):
 
-		super(VAE_Baseline, self).__init__()
-		
-		self.input_dim = input_dim
-		self.latent_dim = latent_dim
-		self.device = device
-		self.n_labels = n_labels
+        super(VAE_Baseline, self).__init__()
 
-		self.obsrv_std = torch.Tensor([obsrv_std]).to(device)
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.device = device
+        self.n_labels = n_labels
 
-		self.z0_prior = z0_prior
-		self.use_binary_classif = use_binary_classif
-		self.classif_per_tp = classif_per_tp
-		self.use_poisson_proc = use_poisson_proc
-		self.linear_classifier = linear_classifier
-		self.train_classif_w_reconstr = train_classif_w_reconstr
+        self.obsrv_std = torch.Tensor([obsrv_std]).to(device)
 
-		z0_dim = latent_dim
-		if use_poisson_proc:
-			z0_dim += latent_dim
+        self.z0_prior = z0_prior
+        self.use_binary_classif = use_binary_classif
+        self.classif_per_tp = classif_per_tp
+        self.use_poisson_proc = use_poisson_proc
+        self.linear_classifier = linear_classifier
+        self.train_classif_w_reconstr = train_classif_w_reconstr
 
-		if use_binary_classif: 
-			if linear_classifier:
-				self.classifier = nn.Sequential(
-					nn.Linear(z0_dim, n_labels))
-			else:
-				self.classifier = create_classifier(z0_dim, n_labels)
-			utils.init_network_weights(self.classifier)
+        z0_dim = latent_dim
+        if use_poisson_proc:
+            z0_dim += latent_dim
 
-
-	def get_gaussian_likelihood(self, truth, pred_y, mask = None):
-		# pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
-		# truth shape  [n_traj, n_tp, n_dim]
-		n_traj, n_tp, n_dim = truth.size()
-
-		# Compute likelihood of the data under the predictions
-		truth_repeated = truth.repeat(pred_y.size(0), 1, 1, 1)
-		
-		if mask is not None:
-			mask = mask.repeat(pred_y.size(0), 1, 1, 1)
-		log_density_data = masked_gaussian_log_density(pred_y, truth_repeated, 
-			obsrv_std = self.obsrv_std, mask = mask)
-		log_density_data = log_density_data.permute(1,0)
-		log_density = torch.mean(log_density_data, 1)
-
-		# shape: [n_traj_samples]
-		return log_density
+        if use_binary_classif:
+            if linear_classifier:
+                self.classifier = nn.Sequential(
+                    nn.Linear(z0_dim, n_labels))
+            else:
+                self.classifier = create_classifier(z0_dim, n_labels)
+            utils.init_network_weights(self.classifier)
 
 
-	def get_mse(self, truth, pred_y, mask = None):
-		# pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
-		# truth shape  [n_traj, n_tp, n_dim]
-		n_traj, n_tp, n_dim = truth.size()
+    def get_gaussian_likelihood(self, truth, pred_y, mask = None):
+        """
+        Compute Gaussian likelihood of the data under the predictions.
+        """
+        # pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
+        # truth shape  [n_traj, n_tp, n_dim]
+        n_traj, n_tp, n_dim = truth.size()
 
-		# Compute likelihood of the data under the predictions
-		truth_repeated = truth.repeat(pred_y.size(0), 1, 1, 1)
-		
-		if mask is not None:
-			mask = mask.repeat(pred_y.size(0), 1, 1, 1)
+        # Compute likelihood of the data under the predictions
+        truth_repeated = truth.repeat(pred_y.size(0), 1, 1, 1)
 
-		# Compute likelihood of the data under the predictions
-		log_density_data = compute_mse(pred_y, truth_repeated, mask = mask)
-		# shape: [1]
-		return torch.mean(log_density_data)
+        if mask is not None:
+            mask = mask.repeat(pred_y.size(0), 1, 1, 1)
+        log_density_data = masked_gaussian_log_density(pred_y, truth_repeated,
+            obsrv_std = self.obsrv_std, mask = mask)
+        log_density_data = log_density_data.permute(1,0)
+        log_density = torch.mean(log_density_data, 1)
+
+        # shape: [n_traj_samples]
+        return log_density
 
 
-	def compute_all_losses(self, batch_dict, n_traj_samples = 1, kl_coef = 1., max_out = None):
-		# Condition on subsampled points
-		# Make predictions for all the points
-		
-		pred_y, info = self.get_reconstruction(batch_dict["tp_to_predict"], 
-			batch_dict["observed_data"], batch_dict["observed_tp"], 
-			mask = batch_dict["observed_mask"], dose = batch_dict['dose'], static = batch_dict['static'], n_traj_samples = n_traj_samples,
-			mode = batch_dict["mode"])
-		if max_out:
-			reconstructions = pred_y
-			dataset = batch_dict['dataset_number']
-			original_indices = dataset.cpu().numpy().astype(int)
-			scaling_factor = max_out['max_out'][original_indices]
-			if 'best_lambda' in max_out.keys():
-				data = inv_boxcox(batch_dict["data_to_predict"], max_out['best_lambda'][0])
-				reconstructions = inv_boxcox(reconstructions, max_out['best_lambda'][0])
-			reconstructions = reconstructions.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
-			data = data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
-			times = batch_dict['y_true_times']
-			reference = np.trapz(data.squeeze(-1), times, axis=1)
-			predicted = np.mean(np.array(reconstructions), axis=0)
-			predicted = np.trapz(predicted.squeeze(-1), batch_dict["tp_to_predict"], axis=1)
-			rmse_overall = np.sqrt(np.mean(np.array((np.array(reference) - predicted) / reference)**2))
-		
-			
-		else:
-			rmse_overall = 0.0
-		indices = torch.searchsorted(batch_dict["tp_to_predict"], batch_dict['y_true_times'])
-		mask = torch.zeros(len(pred_y[1]), len(batch_dict["tp_to_predict"]), dtype=torch.float)
-		mask.scatter_(1, indices, 1.0)
-		mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
-		try:
-			pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
-		except:
-			try:
-				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
-			except:
-				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
-		fp_mu, fp_std, fp_enc = info["first_point"]
-		fp_std = fp_std.abs()
-		fp_distr = Normal(fp_mu, fp_std)
+    def get_mse(self, truth, pred_y, mask = None):
+        """
+        Compute MSE of the data under the predictions.
+        """
+        # pred_y shape [n_traj_samples, n_traj, n_tp, n_dim]
+        # truth shape  [n_traj, n_tp, n_dim]
+        n_traj, n_tp, n_dim = truth.size()
 
-		assert(torch.sum(fp_std < 0) == 0.)
+        # Compute likelihood of the data under the predictions
+        truth_repeated = truth.repeat(pred_y.size(0), 1, 1, 1)
 
-		kldiv_z0 = kl_divergence(fp_distr, self.z0_prior)
+        if mask is not None:
+            mask = mask.repeat(pred_y.size(0), 1, 1, 1)
 
-		if torch.isnan(kldiv_z0).any():
-			print(fp_mu)
-			print(fp_std)
-			raise Exception("kldiv_z0 is Nan!")
+        # Compute likelihood of the data under the predictions
+        log_density_data = compute_mse(pred_y, truth_repeated, mask = mask)
+        # shape: [1]
+        return torch.mean(log_density_data)
 
-		# Mean over number of latent dimensions
-		# kldiv_z0 shape: [n_traj_samples, n_traj, n_latent_dims] if prior is a mixture of gaussians (KL is estimated)
-		# kldiv_z0 shape: [1, n_traj, n_latent_dims] if prior is a standard gaussian (KL is computed exactly)
-		# shape after: [n_traj_samples]
-		valid_times_mask = batch_dict['y_true_times'] != 28.1
-		
-		kldiv_z0 = torch.mean(kldiv_z0,(1,2))
-		# Compute likelihood of all the points
-		rec_likelihood = self.get_gaussian_likelihood(
-			batch_dict["data_to_predict"], pred_y,
-			mask = valid_times_mask)
-		mse = self.get_mse(
-			batch_dict["data_to_predict"], pred_y,
-			mask = valid_times_mask)
-		desired_values = torch.tensor([0, 1, 2, 3], device=batch_dict['static'].device)
-		mse_cond = []
-		for cond in desired_values:
-			condition_mask = torch.isin(batch_dict['static'][:,1], cond)
-			# The rest of the code remains the same
-			mse_cond.append(self.get_mse(
-			batch_dict["data_to_predict"][condition_mask], pred_y[:,condition_mask,:,:],
-			mask = batch_dict["mask_predicted_data"]).detach())
-		pois_log_likelihood = torch.Tensor([0.]).to(get_device(batch_dict["data_to_predict"]))
-		if self.use_poisson_proc:
-			pois_log_likelihood = compute_poisson_proc_likelihood(
-				batch_dict["data_to_predict"], pred_y, 
-				info, mask = batch_dict["mask_predicted_data"])
-			# Take mean over n_traj
-			pois_log_likelihood = torch.mean(pois_log_likelihood, 1)
 
-		################################
-		# Compute CE loss for binary classification on Physionet
-		device = get_device(batch_dict["data_to_predict"])
-		ce_loss = torch.Tensor([0.]).to(device)
-		if (batch_dict["labels"] is not None) and self.use_binary_classif:
+    def compute_all_losses(self, batch_dict, n_traj_samples = 1, kl_coef = 1., max_out = None):
+        """
+        Computes the reconstruction loss, MSE, KL divergence, and classification loss (if applicable).
+        """
+        # Condition on subsampled points
+        # Make predictions for all the points
 
-			if (batch_dict["labels"].size(-1) == 1) or (len(batch_dict["labels"].size()) == 1):
-				ce_loss = compute_binary_CE_loss(
-					info["label_predictions"], 
-					batch_dict["labels"])
-			else:
-				ce_loss = compute_multiclass_CE_loss(
-					info["label_predictions"], 
-					batch_dict["labels"],
-					mask = batch_dict["mask_predicted_data"])
+        pred_y, info = self.get_reconstruction(batch_dict["tp_to_predict"],
+            batch_dict["observed_data"], batch_dict["observed_tp"],
+            mask = batch_dict["observed_mask"], dose = batch_dict['dose'], static = batch_dict['static'], n_traj_samples = n_traj_samples,
+            mode = batch_dict["mode"])
+        if max_out:
+            reconstructions = pred_y
+            dataset = batch_dict['dataset_number']
+            original_indices = dataset.cpu().numpy().astype(int)
+            scaling_factor = max_out['max_out'][original_indices]
+            if 'best_lambda' in max_out.keys():
+                data = inv_boxcox(batch_dict["data_to_predict"], max_out['best_lambda'][0])
+                reconstructions = inv_boxcox(reconstructions, max_out['best_lambda'][0])
+            reconstructions = reconstructions.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
+            data = data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
+            times = batch_dict['y_true_times']
+            reference = np.trapz(data.squeeze(-1), times, axis=1)
+            predicted = np.mean(np.array(reconstructions), axis=0)
+            predicted = np.trapz(predicted.squeeze(-1), batch_dict["tp_to_predict"], axis=1)
+            rmse_overall = np.sqrt(np.mean(np.array((np.array(reference) - predicted) / reference)**2))
 
-		# IWAE loss
-		loss = - torch.logsumexp(rec_likelihood -  kl_coef * kldiv_z0,0)
-		if torch.isnan(loss):
-			loss = - torch.mean(rec_likelihood - kl_coef * kldiv_z0,0)
-			
-		if self.use_poisson_proc:
-			loss = loss - 0.1 * pois_log_likelihood 
 
-		if self.use_binary_classif:
-			if self.train_classif_w_reconstr:
-				loss = loss +  ce_loss * 100
-			else:
-				loss =  ce_loss
-		results = {}
-		results['rmse_auc'] = torch.tensor(rmse_overall)
-		results["loss"] = torch.mean(loss)
-		results["likelihood"] = torch.mean(rec_likelihood).detach()
-		results["mse"] = torch.mean(mse).detach()
-		results['mse_cond'] = torch.tensor(mse_cond)
-		results["pois_likelihood"] = torch.mean(pois_log_likelihood).detach()
-		results["ce_loss"] = torch.mean(ce_loss).detach()
-		results["kl_first_p"] =  torch.mean(kldiv_z0).detach()
-		results["std_first_p"] = torch.mean(fp_std).detach()
-		if batch_dict["labels"] is not None and self.use_binary_classif:
-			results["label_predictions"] = info["label_predictions"].detach()
+        else:
+            rmse_overall = 0.0
+        indices = torch.searchsorted(batch_dict["tp_to_predict"], batch_dict['y_true_times'])
+        mask = torch.zeros(len(pred_y[1]), len(batch_dict["tp_to_predict"]), dtype=torch.float)
+        mask.scatter_(1, indices, 1.0)
+        mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
+        try:
+            pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
+        except:
+            try:
+                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
+            except:
+                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
+        fp_mu, fp_std, fp_enc = info["first_point"]
+        fp_std = fp_std.abs()
+        fp_distr = Normal(fp_mu, fp_std)
 
-		return results
+        assert(torch.sum(fp_std < 0) == 0.)
+
+        kldiv_z0 = kl_divergence(fp_distr, self.z0_prior)
+
+        if torch.isnan(kldiv_z0).any():
+            print(fp_mu)
+            print(fp_std)
+            raise Exception("kldiv_z0 is Nan!")
+
+        # Mean over number of latent dimensions
+        # kldiv_z0 shape: [n_traj_samples, n_traj, n_latent_dims] if prior is a mixture of gaussians (KL is estimated)
+        # kldiv_z0 shape: [1, n_traj, n_latent_dims] if prior is a standard gaussian (KL is computed exactly)
+        # shape after: [n_traj_samples]
+        valid_times_mask = batch_dict['y_true_times'] != 28.1
+
+        kldiv_z0 = torch.mean(kldiv_z0,(1,2))
+        # Compute likelihood of all the points
+        rec_likelihood = self.get_gaussian_likelihood(
+            batch_dict["data_to_predict"], pred_y,
+            mask = valid_times_mask)
+        mse = self.get_mse(
+            batch_dict["data_to_predict"], pred_y,
+            mask = valid_times_mask)
+        desired_values = torch.tensor([0, 1, 2, 3], device=batch_dict['static'].device)
+        mse_cond = []
+        for cond in desired_values:
+            condition_mask = torch.isin(batch_dict['static'][:,1], cond)
+            # The rest of the code remains the same
+            mse_cond.append(self.get_mse(
+            batch_dict["data_to_predict"][condition_mask], pred_y[:,condition_mask,:,:],
+            mask = batch_dict["mask_predicted_data"]).detach())
+        pois_log_likelihood = torch.Tensor([0.]).to(get_device(batch_dict["data_to_predict"]))
+        if self.use_poisson_proc:
+            pois_log_likelihood = compute_poisson_proc_likelihood(
+                batch_dict["data_to_predict"], pred_x,
+                info, mask = batch_dict["mask_predicted_data"])
+            # Take mean over n_traj
+            pois_log_likelihood = torch.mean(pois_log_likelihood, 1)
+
+        ################################
+        # Compute CE loss for binary classification on Physionet
+        device = get_device(batch_dict["data_to_predict"])
+        ce_loss = torch.Tensor([0.]).to(device)
+        if (batch_dict["labels"] is not None) and self.use_binary_classif:
+
+            if (batch_dict["labels"].size(-1) == 1) or (len(batch_dict["labels"].size()) == 1):
+                ce_loss = compute_binary_CE_loss(
+                    info["label_predictions"],
+                    batch_dict["labels"])
+            else:
+                ce_loss = compute_multiclass_CE_loss(
+                    info["label_predictions"],
+                    batch_dict["labels"],
+                    mask = batch_dict["mask_predicted_data"])
+
+        # IWAE loss
+        loss = - torch.logsumexp(rec_likelihood -  kl_coef * kldiv_z0,0)
+        if torch.isnan(loss):
+            loss = - torch.mean(rec_likelihood - kl_coef * kldiv_z0,0)
+
+        if self.use_poisson_proc:
+            loss = loss - 0.1 * pois_log_likelihood
+
+        if self.use_binary_classif:
+            if self.train_classif_w_reconstr:
+                loss = loss +  ce_loss * 100
+            else:
+                loss =  ce_loss
+        results = {}
+        results['rmse_auc'] = torch.tensor(rmse_overall)
+        results["loss"] = torch.mean(loss)
+        results["likelihood"] = torch.mean(rec_likelihood).detach()
+        results["mse"] = torch.mean(mse).detach()
+        results['mse_cond'] = torch.tensor(mse_cond)
+        results["pois_likelihood"] = torch.mean(pois_log_likelihood).detach()
+        results["ce_loss"] = torch.mean(ce_loss).detach()
+        results["kl_first_p"] =  torch.mean(kldiv_z0).detach()
+        results["std_first_p"] = torch.mean(fp_std).detach()
+        if batch_dict["labels"] is not None and self.use_binary_classif:
+            results["label_predictions"] = info["label_predictions"].detach()
+
+        return results
 
 
 class VAE_GMM(VAE_Baseline):
@@ -656,7 +685,7 @@ class VAE_GMM(VAE_Baseline):
         # Mean over batch
         kldiv_z0_mean = torch.mean(kldiv_z0)
 
-		# ===========================================================
+        # ===========================================================
         # STRATEGY 2: Diversity Loss (Entropy of mean usage)
         # ===========================================================
         # 1. Average usage of clusters across the batch (for each sample)
@@ -670,7 +699,7 @@ class VAE_GMM(VAE_Baseline):
         # 3. We want to MAXIMIZE entropy (make usage uniform), so we subtract it from loss.
         # Averaging over samples if necessary
         diversity_loss = torch.mean(usage_entropy)
-		
+
         # ===========================================================
         # 4. Auxiliary Losses (Poisson, Classification)
         # ===========================================================
@@ -1033,7 +1062,7 @@ class VAE_GMM_V2(VAE_Baseline):
         # Mixture Weights (logits): [n_components]
         # Initialize uniformly
         self.prior_weights_logits = nn.Parameter(torch.zeros(n_components).to(device))
-		
+
     def get_gmm_log_density(self, z, hard_assignment = True):
         """
         Computes log p(z) where p is the GMM prior with FULL COVARIANCE.
@@ -1186,7 +1215,7 @@ class VAE_GMM_V2(VAE_Baseline):
         # Mean over batch
         kldiv_z0_mean = torch.mean(kldiv_z0)
 
-		# ===========================================================
+        # ===========================================================
         # STRATEGY 2: Diversity Loss (Entropy of mean usage)
         # ===========================================================
         # 1. Average usage of clusters across the batch (for each sample)
@@ -1200,7 +1229,7 @@ class VAE_GMM_V2(VAE_Baseline):
         # 3. We want to MAXIMIZE entropy (make usage uniform), so we subtract it from loss.
         # Averaging over samples if necessary
         diversity_loss = torch.mean(usage_entropy)
-		
+
         # ===========================================================
         # 4. Auxiliary Losses (Poisson, Classification)
         # ===========================================================
