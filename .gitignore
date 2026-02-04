@@ -1,2 +1,7 @@
 exp_run_all/
-__pycache__/
+__pycache__/*.csv
+*.ckpt
+logs/
+experiments/runs/
+test_gen_tacro_corrected.txt
+*.csv
