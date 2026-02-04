@@ -26,10 +26,10 @@ do
     # Generate a random experiment ID for each run
     EXPERIMENT_ID=$(( RANDOM % 90000 + 10000 )) # Generates a 5-digit random number
     if [ "$SEED" -eq 1 ]; then
-        NUM_PATIENTS=1000
+        NUM_PATIENTS=100
         FIRST_AT=1
     else
-        NUM_PATIENTS=1000
+        NUM_PATIENTS=100
         FIRST_AT=1
     fi
     mkdir -p "exp_run_all/$EXPERIMENT_ID"

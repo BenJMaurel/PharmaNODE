@@ -38,11 +38,7 @@ model_file_path   <- "test_model.txt"
 
 data_file_path    <- file.path(args$output_dir, paste0("virtual_cohort_train.csv"))
 project_save_path <- file.path(args$output_dir, paste0("2_test_tacro.mlxtran"))
-# 4. Create the project
-project_path <- "~/2_test_tacro.mlxtran"
 
-# Load the completed Monolix project
-# loadProject(project_path)
 column_mapping <- c(
   ID          = "id",         # Subject Identifier
   TIME        = "time",       # Time of measurement or dose

@@ -1,6 +1,6 @@
 ###########################
 # Latent ODEs for Irregularly-Sampled Time Series
-# Author: Yulia Rubanova
+# Modified version of Yulia Rubanova
 ###########################
 
 import os
