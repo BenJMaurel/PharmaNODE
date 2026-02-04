@@ -212,8 +212,6 @@ class TacroDataset(torch.utils.data.Dataset):
         self.patient_id = []
         self.auc_red = []
         self.others = []
-        df_auc = pd.read_csv('/Users/benjaminmaurel/tacro_mapbayest_auc_20250826.csv')
-        list_patients_id = df_auc['ID'].tolist()
         
         for patient_id, patient_dict in self.data_dict.items():
             patient_dict = self.data_dict[patient_id]
