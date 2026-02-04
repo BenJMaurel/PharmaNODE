@@ -1,5 +1,5 @@
-# Title: Tacrolimus Pharmacokinetic Analysis from Command Line
-# Author: jbw (converted for command-line execution)
+# Title: Tacrolimus Pharmacokinetic Analysis 
+# Author: benjamin maurel
 # Date: 2025-09-09
 
 # -----------------------------------------------------------------------------
@@ -25,24 +25,24 @@ parser$add_argument("--output_dir", type = "character", default = ".",
                     help = "Directory to save the output PDF and CSV files [default: current directory]")
 parser$add_argument("--cores", type = "integer", default = 1,
                     help = "Number of CPU cores to use for parallel processing [default: 1]")
-parser$add_argument("--monolix_path", type = "character", required = TRUE,
-                    help = "Path to the Monolix installation directory")
-parser$add_argument("--model_file", type = "character", required = TRUE,
-                    help = "Path to the Monolix model file (e.g., model.txt)")
+parser$add_argument("--experiment", type = "character", default = ".",
+                    help = "Directory to save the output PDF and CSV files [default: current directory]")
 args <- parser$parse_args()
 
-# --- Initialize Lixoft Connectors ---
-message("Initializing Lixoft Connectors...")
-initializeLixoftConnectors(software = 'monolix', path = args$monolix_path)
+args <- parser$parse_args()
+message("Defining the tacrolimus pharmacokinetic model...")
+initializeLixoftConnectors(software = 'monolix', path = "/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite")
+# 3. Define the path to your Monolix project file
+# model_file_path   <- "~/model_tacro.txt"
+model_file_path   <- "test_model.txt"
 
-# --- Construct Paths ---
-data_file_path    <- file.path(args$virtual_cohort)
-project_save_path <- file.path(args$output_dir, "tacro_monolix_project.mlxtran")
-model_file_path   <- args$model_file
+data_file_path    <- file.path(args$output_dir, paste0("virtual_cohort_train.csv"))
+project_save_path <- file.path(args$output_dir, paste0("2_test_tacro.mlxtran"))
+# 4. Create the project
+project_path <- "~/2_test_tacro.mlxtran"
 
-message(paste("Data file:", data_file_path))
-message(paste("Model file:", model_file_path))
-message(paste("Project will be saved to:", project_save_path))
+# Load the completed Monolix project
+# loadProject(project_path)
 column_mapping <- c(
   ID          = "id",         # Subject Identifier
   TIME        = "time",       # Time of measurement or dose
@@ -75,24 +75,14 @@ setIndividualParameterModel(list( correlationBlocks = list(id = list()),
 # actual column headers in your data.csv file.
 
 cat("-> Project created and data loaded successfully.\n")
-
-# setPopulationParameterInformation(CL_pop = list(initialValue = 21.2), 
-#                                   Vc_pop  = list(initialValue = 486),
-#                                   Q_pop = list(initialValue = 79),
-#                                   Vp_pop = list(initialValue = 271.0),
-#                                   KTR_pop = list(initialValue = 3.34),
-#                                   beta_CL_CYP_1 = list(initialValue = log(2.0)),
-#                                   beta_Vc_ST_1 = list(initialValue = log(0.29)),
-#                                   beta_KTR_ST_1 = list(initialValue = log(1.53)))
-
 cat("-> Initial parameter values have been set.\n")
 
 saveProject(projectFile = project_save_path)
 cat(paste("-> Project configured and saved to:", project_save_path, "\n"))
-
+cat("-> SAEM estimation has been started!\n")
 runPopulationParameterEstimation()
 
-cat("-> SAEM estimation has been started!\n")
+
 cat("You can monitor its progress in the Monolix GUI or check the results folder that was created next to your project file.\n")
 
 # 5. Extract the results!
@@ -110,81 +100,6 @@ print(results_df)
 # 2. MODEL DEFINITION
 # -----------------------------------------------------------------------------
 message("Defining the tacrolimus pharmacokinetic model...")
-
-# code_tac <- "
-# [PROB]
-# # Population pharmacokinetics of tacrolimus
-# # Woillard de Winter BJCP 2011 
-
-# [PARAM] @annotated
-# TVCL : 21.2 : Typical value of clearance (L/h)
-# TVV1 : 486 : Typical apparent central volume of distribution (L)
-# TVQ : 79 : Typical intercomp clearance 1 (L/h)
-# TVV2 : 271 : Typical peripheral volume of distribution (L)
-# TVKTR : 3.34 : Typical transfer rate constant (1/h)
-# HTCL : -1.14 : Effect of hematocrit on clearance
-# CYPCL : 2.00 : Effect of CYP on clearance
-# STKTR : 1.53 : Effect of study on KTR
-# STV1 : 0.29 : Effect of study on V1
-
-
-# ETA1 : 0 : ETA on clearance
-# ETA2 : 0 : ETA on V1
-# ETA3 : 0 : ETA on Q
-# ETA4 : 0 : ETA on V2
-# ETA5 : 0 : ETA on KTR
-
-# $PARAM @annotated @covariates
-# HT : 35 : Hematocrit (percentage)
-# ST : 1 : Prograf (1) adv (0)
-# CYP : 0 : Expressor (1) non-expressor (0)
-
-
-# [CMT] @annotated
-# DEPOT : Dosing compartment (mg) [ADM]
-# TRANS1 : Transit compartment 1 (mg)
-# TRANS2 : Transit compartment 2 (mg)
-# TRANS3 : Transit compartment 3 (mg)
-# CENT : Central compartment (mg) [OBS]
-# PERI : Peripheral compartment (mg)
-
-# [OMEGA]
-# 0.08
-# 0.10
-# 0.29
-# 0.36
-# 0.06
-
-# [MAIN]
-
-
-# // Apparent clearance (CL_app) and other PK parameters
-# double CL_app = TVCL * pow(HT / 35, HTCL) * pow(CYPCL, CYP) * exp(ETA1 + ETA(1));
-# double V1_app = TVV1  * pow(STV1, ST) * exp(ETA2 + ETA(2));
-
-# // Other parameters
-# double Q = TVQ * exp(ETA3 + ETA(3));
-# double V2 = TVV2 * exp(ETA4 + ETA(4));
-# double KTR = TVKTR * pow(STKTR, ST) * exp(ETA5 + ETA(5));
-
-# [SIGMA] @annotated
-# PROP : 0.012 : Proportional residual unexplained variability
-# ADD : 0.5 : Additive residual unexplained variability
-
-# [ODE]
-# dxdt_DEPOT = -KTR * DEPOT;
-# dxdt_TRANS1 = KTR * DEPOT - KTR * TRANS1;
-# dxdt_TRANS2 = KTR * TRANS1 - KTR * TRANS2;
-# dxdt_TRANS3 = KTR * TRANS2 - KTR * TRANS3;
-# dxdt_CENT = KTR * TRANS3 - (CL_app + Q) * CENT / V1_app + Q * PERI / V2;
-# dxdt_PERI = Q * CENT / V1_app - Q * PERI / V2;
-
-# [TABLE]
-# double CONC = CENT / (V1_app / 1000);
-# capture DV = CONC * (1 + PROP) + ADD;
-# $CAPTURE DV CL_app 
-# "
-# mod_tac <- mcode("tac_model", code_tac)
 
 omega_Cl <- monolix_results[["omega_CL"]]^2
 omega_Vc <- monolix_results[["omega_Vc"]]^2
@@ -287,28 +202,6 @@ mod_tac_updated <- param(
   STV1  = exp(monolix_results[["beta_Vc_ST_1"]])
 )
 
-# prop_variance <- monolix_results[["prop_err_pop"]]^2
-# add_variance  <- monolix_results[["add_err_pop"]]^2
-
-# # Create a diagonal SIGMA matrix with the VARIANCES
-# sigma_matrix <- diag(c(prop_variance, add_variance))
-
-# # Use smat() to explicitly update the SIGMA block
-# mod_tac_updated <- smat(mod_tac_updated, sigma_matrix)
-
-# Update the OMEGA block (no changes here)
-# omega_variances <- c(
-#   monolix_results[["omega_T1_CL"]]^2,
-#   monolix_results[["omega_T1_Vc"]]^2,
-#   monolix_results[["omega_Q"]]^2,
-#   monolix_results[["omega_Vp"]]^2,
-#   monolix_results[["omega_T1_KTR"]]^2
-# )
-
-# cat("\n--- The final omega_variances vector ---\n")
-# omega_matrix <- diag(omega_variances)
-# mod_tac_updated <- omat(mod_tac_updated, mat = omega_matrix)
-
 # ---------------------------------------------------------------------------
 # ## STEP 4: VERIFY AND USE THE UPDATED MODEL
 # ---------------------------------------------------------------------------
@@ -390,15 +283,13 @@ run_one_id <- function(patient_id, all_raw_data, obs_data) {
   auc_ipred <- auc(ipred_win_unique$time, ipred_win_unique$DV)
   # Return a list containing both the plot object and the results tibble
   ind_params <- get_param(est_obj, .name = c("CL_app", "V1_app", "Q", "V2", "KTR"))
-  # --- MODIFICATION END ---
   cat(ind_params['V'])
   # Return a list containing both the plot object and the results tibble
   list(
-    # MODIFICATION: Added xlim = c(0, 24) to set the plot's time range
+    
     plot = plot(aug, main = sprintf("ID %s — amt=%g mg — ii=%gh — ST=%s",
                                       patient_id, amt_val, ii_val, as.character(st_val)),
                 xlim = c(0, 24)), 
-    # --- MODIFICATION START ---
     # Add the extracted parameters to the results tibble.
     results = tibble(
       ID = patient_id, ST = st_val, amt = amt_val, ii  = ii_val, CYP = cyp_val,
@@ -410,7 +301,6 @@ run_one_id <- function(patient_id, all_raw_data, obs_data) {
       Vp = ind_params[4],
       Ktr = ind_params[5]
     )
-    # --- MODIFICATION END ---
   )
 }
 

@@ -89,7 +89,7 @@ def get_cum_delta_ts(data, delta_ts, mask):
 		k = missing_index[2][idx]
 
 		if j != 0 and j != (n_tp-1):
-		 	cum_delta_ts[i,j+1,k] = cum_delta_ts[i,j+1,k] + cum_delta_ts[i,j,k]
+			cum_delta_ts[i,j+1,k] = cum_delta_ts[i,j+1,k] + cum_delta_ts[i,j,k]
 	cum_delta_ts = cum_delta_ts / cum_delta_ts.max() # normalize
 
 	return cum_delta_ts
@@ -110,7 +110,7 @@ def impute_using_input_decay(data, delta_ts, mask, w_input_decay, b_input_decay)
 		k = missing_index[2][idx]
 
 		if j != 0 and j != (n_tp-1):
-		 	cum_delta_ts[i,j+1,k] = cum_delta_ts[i,j+1,k] + cum_delta_ts[i,j,k]
+			cum_delta_ts[i,j+1,k] = cum_delta_ts[i,j+1,k] + cum_delta_ts[i,j,k]
 		if j != 0:
 			data_last_obsv[i,j,k] = data_last_obsv[i,j-1,k] # last observation
 	cum_delta_ts = cum_delta_ts / cum_delta_ts.max() # normalize

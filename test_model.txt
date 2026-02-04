@@ -1,0 +1,32 @@
+[LONGITUDINAL]
+input = {CL, Vc, KTR, Vp, Q}
+
+PK:
+depot(target=DEPOT)
+; Define compartments and ODE system
+compartment(cmt=1, amount=DEPOT) ; Dosing compartment
+compartment(cmt=2, amount=TRANS1)      ; Transit 1
+compartment(cmt=3, amount=TRANS2)      ; Transit 2
+compartment(cmt=4, amount=TRANS3)      ; Transit 3
+compartment(cmt=5, amount=CENT, volume=Vc, concentration=CONC) ; Central
+compartment(cmt=6, amount=PERI, volume=Vp) ; Peripheral
+
+EQUATION:
+odeType=stiff
+; Define transfer rates
+
+k_el = CL/Vc
+k_12 = Q/Vc
+k_21 = Q/Vp
+; ODEs
+ddt_DEPOT   = -KTR * DEPOT
+ddt_TRANS1  =  KTR * DEPOT   - KTR * TRANS1
+ddt_TRANS2  =  KTR * TRANS1  - KTR * TRANS2
+ddt_TRANS3  =  KTR * TRANS2  - KTR * TRANS3
+ddt_CENT    =  KTR * TRANS3  - k_el * CENT - k_12 * CENT + k_21 * PERI
+ddt_PERI    =  k_12 * CENT - k_21 * PERI
+CONC = CENT / (Vc)* 1000
+OUTPUT:
+; Define the output variable and error model
+output = {CONC}
+; The division by (V1/1000) converts units from mg/L to ng/mL

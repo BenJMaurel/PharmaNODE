@@ -2,7 +2,7 @@
 
 # Define the range of seeds you want to use
 START_SEED=101
-END_SEED=201 # Run for seeds from 1 to 10
+END_SEED=201 
 
 # Define your Python script names
 GENERATE_DATA='gen_tacro.py'
@@ -58,10 +58,7 @@ do
 
     # --- Step 2: Test the trained model ---
     echo "Testing model..."
-    #FULL_COMMAND_TEST="$BASE_COMMAND_TEST --seed $SEED --load $EXPERIMENT_ID"
-    # We capture the output of test_models.py and append it to our results file
     echo "--- Results for Seed $SEED (Experiment ID: $EXPERIMENT_ID) ---" >> "$ALL_TEST_RESULTS_FILE"
-    # Append the output of test_models.py directly to the results file
     # We use 'grep' to filter only the lines containing "Error comparison" and "RMSE comparison"
     # and the lines with the actual error/rmse values. This keeps the results file clean.
     python3 $BASE_COMMAND_TEST --seed $SEED --load $EXPERIMENT_ID --experiment $EXPERIMENT_ID| \

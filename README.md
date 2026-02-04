@@ -10,6 +10,7 @@ The primary goal of this project is to demonstrate the effectiveness of NODEs in
 - **Train NODE-based models** on pharmacokinetic (PK) data.
 - **Evaluate model performance** by comparing predicted AUC values against established benchmarks.
 - **Run a full experimental pipeline**, from data generation to results analysis.
+- **Visualize the latent space for interpretation**
 
 The codebase is designed to be modular, allowing for experimentation with different model configurations and datasets.
 
