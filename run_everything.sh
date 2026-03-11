@@ -5,7 +5,7 @@ START_SEED=101
 END_SEED=201 
 
 # Define your Python script names
-GENERATE_DATA='gen_tacro.py'
+GENERATE_DATA='gen_tacro_film.py'
 R_SCRIPT_TEST='all_run_tacro.R'
 PYTHON_SCRIPT_TRAIN="run_models.py"
 PYTHON_SCRIPT_TEST="test_model.py"
@@ -13,7 +13,7 @@ PYTHON_SCRIPT_ANALYZE="analyse_std.py" # New script for analysis
 
 # Define your base commands
 BASE_COMMAND_R="$R_SCRIPT_TEST" 
-BASE_COMMAND_TRAIN="$PYTHON_SCRIPT_TRAIN --niters 6000 -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5."
+BASE_COMMAND_TRAIN="$PYTHON_SCRIPT_TRAIN --niters 6000 -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5. --use_film"
 BASE_COMMAND_TEST="$PYTHON_SCRIPT_TEST -n 200 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5."
 # Create a file to store all test results for later analysis
 ALL_TEST_RESULTS_FILE="test_gen_tacro_corrected.txt"
@@ -26,17 +26,17 @@ do
     # Generate a random experiment ID for each run
     EXPERIMENT_ID=$(( RANDOM % 90000 + 10000 )) # Generates a 5-digit random number
     if [ "$SEED" -eq 1 ]; then
-        NUM_PATIENTS=100
+        NUM_PATIENTS=1000
         FIRST_AT=1
     else
-        NUM_PATIENTS=100
+        NUM_PATIENTS=1000
         FIRST_AT=1
     fi
     mkdir -p "exp_run_all/$EXPERIMENT_ID"
     echo "----------------------------------------------------"
     echo "Running experiment with Seed: $SEED, Experiment ID: $EXPERIMENT_ID"
     echo "Generating data..."
-    python3 $GENERATE_DATA --exp $EXPERIMENT_ID --num_patients $NUM_PATIENTS --first_at $FIRST_AT --scenario 3
+    python3 $GENERATE_DATA --exp $EXPERIMENT_ID --num_patients $NUM_PATIENTS --first_at $FIRST_AT --scenario 2
     # --- Step 1: Train the model ---
     echo "Training model..."
     Rscript $BASE_COMMAND_R --virtual_cohort virtual_cohort_test.csv --output_dir exp_run_all/$EXPERIMENT_ID --experiment $EXPERIMENT_ID --cores 10

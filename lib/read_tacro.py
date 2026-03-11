@@ -9,6 +9,7 @@ import glob
 import os
 import re 
 import chardet
+import itertools
 
 def auc_linuplogdown(conc, time):
     """
@@ -63,139 +64,291 @@ def convert(value):
     else:
         raise ValueError(f"Invalid format: {value}")
 
-def extract_gen_tac(file_path = ["virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = True, exp = None):
+def extract_gen_tac(file_path=["virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot=True, exp=None):
+   
     data_dict = {}
+    
+    # 1. Load the dataset (handles standard or film datasets)
     if exp:
-        file_path[0] = f"exp_run_all/{exp}/virtual_cohort_train.csv"
         try:
+            file_path[0] = f"exp_run_all/{exp}/virtual_cohort_train.csv"
             file_path[1] = f"exp_run_all/{exp}/virtual_cohort_test.csv"
+            df1 = pd.read_csv(file_path[0], sep=",")
+            df2 = pd.read_csv(file_path[1], sep=",") if os.path.exists(file_path[1]) else pd.DataFrame()
+            df = pd.concat([df1, df2])
         except:
-            pass
-    df1 = pd.read_csv(file_path[0], sep=",")
-    df2 = pd.read_csv(file_path[1], sep=",")
-    df = pd.concat([df1, df2])
+            file_path[0] = f"exp_run_all/{exp}/virtual_cohort_film_train.csv"
+            file_path[1] = f"exp_run_all/{exp}/virtual_cohort_film_test.csv"
+            df1 = pd.read_csv(file_path[0], sep=",")
+            df2 = pd.read_csv(file_path[1], sep=",") if os.path.exists(file_path[1]) else pd.DataFrame()
+            df = pd.concat([df1, df2])
+    else:
+        df1 = pd.read_csv(file_path[0], sep=",")
+        df2 = pd.read_csv(file_path[1], sep=",") if len(file_path) > 1 and os.path.exists(file_path[1]) else pd.DataFrame()
+        df = pd.concat([df1, df2])
 
     df.columns = df.columns.str.strip()
-    # Combine ID and group to make a unique new ID
-    
-    df['ID_2'] = df['ID'].astype(str)
-    df['ID_new'] = df['ID'].astype(str)
+    if 'VISIT' in df.columns:
+        df['ID_new'] = df['ID'].astype(str) + "_" + df['VISIT'].astype(str)
+    else:
+        df['ID_new'] = df['ID'].astype(str)
+    # df['ID_2'] = df['ID'].astype(str)
     df['OUT'] = pd.to_numeric(df['DV'].replace('.', None), errors='coerce')
     df['DOSE'] = pd.to_numeric(df['AMT'].replace('.', None), errors='coerce')
     df['TIME'] = pd.to_numeric(df['TIME'].replace('.', None), errors='coerce')
+    
     ids_to_remove = df.loc[df['OUT'] > 50000, 'ID_new'].unique()
-    # Step 2: Filter out rows where ID_new is in that list
-    df= df[~df['ID_new'].isin(ids_to_remove)]
+    df = df[~df['ID_new'].isin(ids_to_remove)]
     
     # Scaling
     df['DOSE'] = df['DOSE'] / df['DOSE'].max()
     
-    df['OUT'] = df['OUT']
     max_out = df['OUT'].max()
     df['OUT'] = df['OUT'] / max_out
 
-    boxcox_transformed_data, best_lambda = stats.boxcox(df[df['OUT'] > 0]['OUT']) # Add a tiny constant to ensure all data is > 0
     mask = (df['OUT'] > 0) & (df['OUT'].notna())
+    boxcox_transformed_data, best_lambda = stats.boxcox(df[mask]['OUT'])
     df.loc[mask, 'OUT'] = boxcox_transformed_data
 
-    # Optional: Drop intermediate columns
     unique_patient = df['ID_new'].unique()
     
-    # Exclude 
-    aucs = []
-    today_date = datetime.date.today()
-    date_str = today_date.strftime("%Y%m%d")
-    try:
-        search_pattern = os.path.join(f"exp_run_all/{exp}", 'tacro_mapbayest_auc_*.csv')
-        # 2. Find files matching the pattern
-        matching_files = glob.glob(search_pattern)
+    # ---------------------------------------------------------
+    # 2. SAFELY Load MapBayesian Estimations (Make it Optional)
+    # ---------------------------------------------------------
+    data_be = None
+    if exp:
         try:
-            filename = matching_files[-1]
-        except:
-            filename = matching_files[0]
-        data_be = pd.read_csv(filename)
-    except:
-        yesterday_date = today_date - datetime.timedelta(days=1)
-        date_str = yesterday_date.strftime("%Y%m%d")
-        filename = f"exp_run_all/{exp}/tacro_mapbayest_auc_{date_str}.csv"
-        # filename = 'exp_all_runs/tacro_mapbayest_auc_20250926.csv'
-        data_be = pd.read_csv(filename)
+            search_pattern = os.path.join(f"exp_run_all/{exp}", 'tacro_mapbayest_auc_*.csv')
+            matching_files = glob.glob(search_pattern)
+            if matching_files:
+                filename = matching_files[-1]
+                data_be = pd.read_csv(filename)
+            else:
+                # Try yesterday's date as fallback
+                today_date = datetime.date.today()
+                yesterday_date = today_date - datetime.timedelta(days=1)
+                date_str = yesterday_date.strftime("%Y%m%d")
+                fallback_filename = f"exp_run_all/{exp}/tacro_mapbayest_auc_{date_str}.csv"
+                if os.path.exists(fallback_filename):
+                    data_be = pd.read_csv(fallback_filename)
+        except Exception as e:
+            print(f"Note: MapBayEst file not found or could not be loaded ({e}). Proceeding without it.")
+    
+    # ---------------------------------------------------------
+    # 3. Process Patients
+    # ---------------------------------------------------------
     for patient_id in unique_patient:
-         
         patient_df = df[df['ID_new'] == patient_id]
         patient_df_clean = patient_df[patient_df['OUT'].notna()]
         
+        if patient_df_clean.empty:
+            continue
+            
         patient_df_clean.loc[:, 'TIME'] = patient_df_clean['TIME'] - patient_df_clean['TIME'].iloc[0]
         nbr_ss = patient_df_clean['nbr_ss'].tolist()[0]
         y_times = patient_df_clean['TIME'].tolist()
         y_values = patient_df_clean['OUT'].astype(float).tolist()
-        auc = patient_df_clean['AUC'].values[1]
+        
+        # Safe AUC extraction
+        auc = patient_df_clean['AUC'].values[1] if len(patient_df_clean['AUC'].values) > 1 else patient_df_clean['AUC'].values[0]
+        
         target_times = [0., 1., 3.]
         x_times = []
         for target in target_times:
-            # Find the absolute difference between each time and the target
             diffs = np.abs(patient_df_clean['TIME'] - target)
-            # Get the index of the closest value
             closest_idx = diffs.idxmin()
-            # Append the closest time value
             x_times.append(float(patient_df_clean.loc[closest_idx, 'TIME']))
+            
         x_values = patient_df_clean[patient_df_clean['TIME'].isin(x_times)]['OUT'].astype(float).tolist()[:3]
         
         if x_values and len(x_times) == len(target_times):
-                y_true_times = y_times
-                patient_df_clean = patient_df[patient_df['DOSE'].notna()]
+            y_true_times = y_times
+            doses = patient_df['DOSE'].astype(float).tolist()[0]
+            
+            # --- Safe extraction of 'others' and 'auc_be' ---
+            others = [-1.0] * 6 # Default to -1.0
+            auc_be_val = np.array([0.0])
+            
+            # If MapBayEst data is available, try to use it
+            if data_be is not None:
                 patient_be = data_be[data_be['ID'] == int(patient_id)]
-                doses = patient_df['DOSE'].astype(float).tolist()[0]
+                if not patient_be.empty:
+                    try:
+                        others = [patient_be['Cl'].values[0], patient_be['Vc'].values[0], patient_be['Q'].values[0], 
+                                  patient_be['Vp'].values[0], patient_be['Ktr'].values[0], patient_df['HT'].values[0]]
+                        
+                        auc_be_raw = patient_be['auc_ipred'].values / max_out
+                        if len(auc_be_raw) > 0:
+                            auc_be_val = auc_be_raw
+                    except Exception as e:
+                        pass # Fallback to trying patient_df if columns are missing
+            
+            # If 'others' is still default, fallback to patient_df data if available
+            if others[0] == -1.0:
                 try:
-                    # For visualisation inside the latent space, can be relevant.
-                    others = [patient_be['Cl'].values[0], patient_be['Vc'].values[0], patient_be['Q'].values[0], patient_be['Vp'].values[0], patient_be['Ktr'].values[0], patient_df['HT'].values[0]]
+                    if 'K_ELIM' in patient_df.columns:
+                        k_elim = patient_df['K_ELIM'].astype(float).values[0]
+                        k_12 = patient_df['K_12'].astype(float).values[0]
+                        k_21 = patient_df['K_21'].astype(float).values[0]
+                        ht = patient_df['HT'].astype(float).values[0]
+                        others = [k_elim, k_12, k_21, -1, -1, ht]
+                    elif 'HT' in patient_df.columns:
+                        others = [-1.0, -1.0, -1.0, -1.0, -1.0, patient_df['HT'].astype(float).values[0]]
                 except:
-                    others = [-1 for i in range(6)]
+                    pass
+            # ------------------------------------------------
+            
+            if (patient_df['CYP'] == 1).all():
+                classe = 1 # 0: Rein, 1: Card, 2: Poumons classe = organ
+            else: 
+                classe = 0
                 
-                if (patient_df['CYP'] == 1).all():
-                    classe = 1 # 0: Rein, 1: Card, 2: Poumons classe = organ
-                else: 
-                    classe = 0
-                if float(patient_df['II'].values[0]) == 24:
-                    traitement = 0 # 0: ADV
-                else:
-                    traitement = 1 # 1: PRO
-                auc_be = patient_be['auc_ipred'].values/max_out
-                if len(auc_be) ==0:
-                    auc_be = np.array([0.0])
-                static = [doses, traitement, classe]
-                data_dict[patient_id] = {
-                    'times_val': torch.tensor(y_times),
-                    'values_val': torch.tensor(y_values),
-                    'y_true_times': torch.tensor(y_true_times),
-                    'x_values': torch.tensor(x_values),
-                    'x_times': torch.tensor(x_times),
-                    'doses': torch.tensor(doses),
-                    'static': torch.tensor(static),
-                    'patient_id': patient_id,
-                    'dataset_number': torch.tensor(int(0.)),
-                    'others' : torch.tensor(others),
-                    'auc_be': torch.tensor(auc_be),
-                    'auc_red' : torch.tensor(auc/max_out)}
+            if float(patient_df['II'].values[0]) == 24:
+                traitement = 0 # 0: ADV
+            else:
+                traitement = 1 # 1: PRO
                 
-    # if plot:
-    #     # Plot OUT vs TIME for each subject
-    #     # plt.figure(figsize=(10, 6))
-    #     # plt.hist(aucs, bins = 20)
-    #     for subject_id, group in data_dict.items():
-    #         print(subject_id)
-    #         plt.plot(group['times_val'], group['values_val'], marker='o', label=f'ID {(subject_id)}')
-        
-    #     plt.title('PK Data: OUT vs TIME by Subject')
-    #     plt.xlabel('Time')
-    #     plt.ylabel('Concentration (OUT)')
-    #     plt.legend(title='Subject ID', bbox_to_anchor=(1.05, 1), loc='upper left')
-    #     plt.tight_layout()
-    #     plt.grid(True)
-    #     plt.show()
+            static = [doses, traitement, classe]
+            
+            data_dict[patient_id] = {
+                'times_val': torch.tensor(y_times),
+                'values_val': torch.tensor(y_values),
+                'y_true_times': torch.tensor(y_true_times),
+                'x_values': torch.tensor(x_values),
+                'x_times': torch.tensor(x_times),
+                'doses': torch.tensor(doses),
+                'static': torch.tensor(static),
+                'patient_id': patient_id,
+                'dataset_number': torch.tensor(int(0.)),
+                'others': torch.tensor(others),
+                'auc_be': torch.tensor(auc_be_val),
+                'auc_red': torch.tensor(auc / max_out)
+            }
 
     return data_dict, [max_out, best_lambda]
 
+def extract_gen_tac_film(file_path=["virtual_cohort_film_train.csv", "virtual_cohort_film_test.csv"], exp=None):
+    if exp:
+        file_path = [f"exp_run_all/{exp}/virtual_cohort_film_train.csv", f"exp_run_all/{exp}/virtual_cohort_film_test.csv"]
+    df = pd.concat([pd.read_csv(f) for f in file_path if os.path.exists(f)])
+    df['OUT'] = pd.to_numeric(df['DV'].replace('.', None), errors='coerce')
+    df['DOSE'] = pd.to_numeric(df['AMT'].replace('.', None), errors='coerce')
+    df['TIME'] = pd.to_numeric(df['TIME'].replace('.', None), errors='coerce')
+    
+    df['DOSE'] = df['DOSE'] / df['DOSE'].max()
+    max_out = df['OUT'].max()
+    df['OUT'] = df['OUT'] / max_out
+    
+    mask = (df['OUT'] > 0) & (df['OUT'].notna())
+    boxcox_transformed_data, best_lambda = stats.boxcox(df[mask]['OUT'])
+    df.loc[mask, 'OUT'] = boxcox_transformed_data
+
+    data_dict = {}
+    unique_patients = df['ID'].unique()
+    
+    for patient_id in unique_patients:
+        patient_df = df[df['ID'] == patient_id]
+        data_dict[patient_id] = {}
+        auc = [0.0,0.0]
+        for visit in [1, 2]:
+            visit_df = patient_df[patient_df['VISIT'] == visit]
+            if visit_df.empty: continue
+            
+            visit_df_clean = visit_df[visit_df['OUT'].notna()]
+            visit_df_clean.loc[:, 'TIME'] = visit_df_clean['TIME'] - visit_df_clean['TIME'].iloc[0]
+            auc[visit-1] = visit_df['AUC'].values[1] if len(visit_df['AUC'].values) > 1 else visit_df['AUC'].values[0]
+            
+            y_times = visit_df_clean['TIME'].tolist()
+            y_values = visit_df_clean['OUT'].astype(float).tolist()
+            k_elim = patient_df['K_ELIM'].astype(float).values[0]
+            k_12 = patient_df['K_12'].astype(float).values[0]
+            k_21 = patient_df['K_21'].astype(float).values[0]
+            ht = patient_df['HT'].astype(float).values[0]
+            others = [k_elim, k_12, k_21, -1, -1, ht]
+            # others = [-1, -1, -1, -1, -1, -1]
+            x_times, x_values = [], []
+            for target in [0., 1., 3.]:
+                idx = np.abs(visit_df_clean['TIME'] - target).idxmin()
+                x_times.append(float(visit_df_clean.loc[idx, 'TIME']))
+                x_values.append(float(visit_df_clean.loc[idx, 'OUT']))
+            
+            dose = visit_df[visit_df['DOSE'].notna()]['DOSE'].astype(float).tolist()[0]
+            classe = 1 if (visit_df['CYP'] == 1).all() else 0
+            traitement = 0 if float(visit_df['II'].values[0]) == 24 else 1
+            static = [dose, traitement, classe]
+
+            data_dict[patient_id][f'v{visit}'] = {
+                'times_val': torch.tensor(y_times),
+                'values_val': torch.tensor(y_values),
+                'x_times': torch.tensor(x_times),
+                'x_values': torch.tensor(x_values),
+                'others': torch.tensor(others),
+                'doses': torch.tensor(dose),
+                'static': torch.tensor(static),
+                'macro_time': torch.tensor([0.0], dtype=torch.float32),
+                'auc_red': torch.tensor(auc[visit - 1] / max_out),
+                'delta_t': torch.tensor([0.0])
+            }
+            
+    return data_dict, [max_out, best_lambda]
+
+class TacroFilmDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dict):
+        self.patient_ids = list(data_dict.keys())
+        self.data_dict = data_dict
+
+    def __len__(self):
+        return len(self.patient_ids)
+
+    def __getitem__(self, idx):
+        pid = self.patient_ids[idx]
+        v1 = self.data_dict[pid]['v1']
+        v2 = self.data_dict[pid]['v2']
+        try:
+            delta_t = self.data_dict[pid]['delta_t']
+        except:
+            delta_t = self.data_dict[pid]['v2']['delta_t']
+        return (
+            v1['times_val'], v1['values_val'], v1['x_times'], v1['x_values'], v1['doses'], v1['static'], v1['auc_red'],v1['others'],
+            v2['times_val'], v2['values_val'], v2['x_times'], v2['x_values'], v2['doses'], v2['static'], v2['auc_red'], v2['others'],v1['macro_time'],delta_t, pid
+        )
+    
+def collate_fn_tacro_film(batch, device):
+    # V1 (Encoder Input & Target)
+    nobv = 8 #number_of_obs_by_visit
+    obs_v1 = torch.stack([b[3] for b in batch]).unsqueeze(-1).to(device)
+    tp_obs_v1 = torch.tensor([0.0, 1.0, 3.0]).to(device)
+    dose_v1 = torch.stack([b[4] for b in batch]).to(device)
+    static_v1 = torch.stack([b[5] for b in batch]).to(device)
+    data_pred_v1 = torch.stack([b[1] for b in batch]).unsqueeze(-1).to(device)
+    #tp_pred_v1 = torch.unique(torch.stack([b[0] for b in batch])).to(device)
+    tp_pred_v1 = torch.stack([b[0] for b in batch]).mean(dim=0).to(device)
+    auc_red_v1 = torch.stack([b[6] for b in batch]).to(device)
+    others_v1 = torch.stack([b[7] for b in batch]).to(device)
+    # --- NEW: V2 (Encoder Input & Target) ---
+    obs_v2 = torch.stack([b[nobv +3] for b in batch]).unsqueeze(-1).to(device)
+    tp_obs_v2 = torch.tensor([0.0, 1.0, 3.0]).to(device)
+    dose_v2 = torch.stack([b[nobv +4] for b in batch]).to(device)
+    static_v2 = torch.stack([b[nobv +5 ] for b in batch]).to(device)
+    data_pred_v2 = torch.stack([b[nobv +1] for b in batch]).unsqueeze(-1).to(device)
+    # tp_pred_v2 = torch.unique(torch.stack([b[nobv] for b in batch])).to(device)
+    tp_pred_v2 = torch.stack([b[nobv] for b in batch]).mean(dim=0).to(device) # NEW
+    auc_red_v2 = torch.stack([b[nobv+6] for b in batch]).to(device)
+    others_v2 = torch.stack([b[nobv +7] for b in batch]).to(device)
+    delta_t = torch.stack([b[-2] for b in batch]).to(device)
+    t_v1 = torch.stack([b[-3] for b in batch]).to(device)
+    return {
+        "observed_data_v1": obs_v1, "observed_tp_v1": tp_obs_v1, "dose_v1": dose_v1, "static_v1": static_v1,
+        "data_to_predict_v1": data_pred_v1, "tp_to_predict_v1": tp_pred_v1, "auc_red_v1" : auc_red_v1, "others_v1":others_v1,
+        "others_v2": others_v2,
+        
+        # Add the new V2 sparse inputs
+        "observed_data_v2": obs_v2, "observed_tp_v2": tp_obs_v2, "dose_v2": dose_v2, "static_v2": static_v2,
+        "data_to_predict_v2": data_pred_v2, "tp_to_predict_v2": tp_pred_v2, "auc_red_v2" : auc_red_v2,
+        "delta_t": delta_t,
+        "t_v1" : t_v1,
+        "patient_ids": [b[-1] for b in batch]
+    }
 
 class TacroDataset(torch.utils.data.Dataset):
     def __init__(self, data_dict, is_train = False, mean=None, std=None):

@@ -384,7 +384,7 @@ class VAE_Baseline(nn.Module):
 				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
 		# print("get_reconstruction done -- computing likelihood")
 		fp_mu, fp_std, fp_enc = info["first_point"]
-		fp_std = fp_std.abs()
+		fp_std = fp_std.abs().clamp(min=1e-5)
 		fp_distr = Normal(fp_mu, fp_std)
 
 		assert(torch.sum(fp_std < 0) == 0.)
@@ -638,7 +638,7 @@ class VAE_GMM(VAE_Baseline):
         # 3. KL Divergence Calculation for GMM Prior
         # ===========================================================
         fp_mu, fp_std, fp_enc = info["first_point"]
-        fp_std = fp_std.abs()
+        fp_std = fp_std.abs().clamp(min=1e-5)
         
         # Check numerics
         assert(torch.sum(fp_std < 0) == 0.)
@@ -928,7 +928,7 @@ class VAE_GMM_V(VAE_Baseline):
         # 3. KL Divergence Calculation (Updated)
         # ===========================================================
         fp_mu, fp_std, fp_enc = info["first_point"]
-        fp_std = fp_std.abs()
+        fp_std = fp_std.abs().clamp(min=1e-5)
         
         eps = torch.randn_like(fp_mu)
         z0_samples = fp_mu + fp_std * eps
@@ -1169,7 +1169,7 @@ class VAE_GMM_V2(VAE_Baseline):
         # 3. KL Divergence Calculation for GMM Prior
         # ===========================================================
         fp_mu, fp_std, fp_enc = info["first_point"]
-        fp_std = fp_std.abs()
+        fp_std = fp_std.abs().clamp(min=1e-5)
         
         # Check numerics
         assert(torch.sum(fp_std < 0) == 0.)
@@ -1389,7 +1389,7 @@ class VAE_Flow(VAE_Baseline):
         # 2. KL Divergence with Flow Prior
         # ===========================================================
         fp_mu, fp_std, fp_enc = info["first_point"]
-        fp_std = fp_std.abs()
+        fp_std = fp_std.abs().clamp(min=1e-5)
         
         # A. Sample z0 from the posterior q(z|x)
         # We use the reparameterization trick

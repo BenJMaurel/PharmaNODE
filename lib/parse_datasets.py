@@ -84,7 +84,7 @@ def parse_datasets(args, device):
 			max_out['best_lambda'] = np.array(_best_lambda)
 		max_out['max_out']=  np.array(max_out_list)
 		if datasets_to_load_train == ['gen_tac']:
-			train_keys, test_keys = utils.virtual_train_test_list_dict(dict_list_train, train_fraq = 0.2)
+			train_keys, test_keys = utils.virtual_train_test_list_dict(dict_list_train, train_fraq = 0.8)
 		else:
 			train_keys, test_keys = utils.split_train_test_list_dict(dict_list_train, train_fraq = 0.8)
 		if test == 1:
@@ -110,7 +110,6 @@ def parse_datasets(args, device):
 			collate_fn= lambda batch: collate_fn_tacro(batch, args = args, data_type = "train", device = device))
 		test_dataloader = DataLoader(dataset_test, batch_size = args.n, shuffle=False,
 			collate_fn= lambda batch: collate_fn_tacro(batch, args = args, data_type = "test", device = device))
-		
 		data_objects = {"dataset_train": dataset_train,
 					"dataset_test": dataset_test,
 					"train_dataloader": utils.inf_generator(train_dataloader), 

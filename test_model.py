@@ -52,7 +52,6 @@ parser.add_argument('--save', type=str, default='experiments/', help="Path for s
 parser.add_argument('--experiment', type = str, default = None, help="Fix experiment number for reproducibility")
 parser.add_argument('--load', type=str, default=None, help="ID of the experiment to load for evaluation. If None, run a new experiment.")
 parser.add_argument('-r', '--random-seed', type=int, default=1991, help="Random_seed")
-
 parser.add_argument('--dataset', type=str, default='periodic', help="Dataset to load. Available: physionet, activity, hopper, periodic")
 parser.add_argument('-s', '--sample-tp', type=float, default=None, help="Number of time points to sub-sample."
 	"If > 1, subsample exact number of points. If the number is in [0,1], take a percentage of available points per time series. If None, do not subsample")
@@ -99,6 +98,7 @@ parser.add_argument('--seed', type = int, default = 15, help="Fix seed for repro
 
 args = parser.parse_args()
 
+args.use_film = False 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 file_name = os.path.basename(__file__)[:-3]
 utils.makedirs(args.save)

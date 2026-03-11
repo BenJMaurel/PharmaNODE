@@ -157,7 +157,7 @@ def compute_masked_likelihood(mu, data, mask, likelihood_func):
 	res = torch.stack(res, 0).to(get_device(data))
 	res = res.reshape((n_traj_samples, n_traj, n_dims))
 	# Take mean over the number of dimensions
-	res = torch.mean(res, -1) # !!!!!!!!!!! changed from sum to mean
+	res = torch.mean(res, -1) # changed from sum to mean
 	res = res.transpose(0,1)
 	return res
 

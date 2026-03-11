@@ -1,8 +1,3 @@
-###########################
-# Latent ODEs for Irregularly-Sampled Time Series
-# Author: Yulia Rubanova
-###########################
-
 import os
 import sys
 import matplotlib
@@ -20,7 +15,7 @@ import numpy as np
 import pandas as pd
 from random import SystemRandom
 from sklearn import model_selection
-
+import random
 
 import torch
 import torch.nn as nn
@@ -43,7 +38,7 @@ parser = argparse.ArgumentParser('Latent ODE')
 parser.add_argument('-n',  type=int, default=100, help="Size of the dataset")
 parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr',  type=float, default=1e-2, help="Starting learning rate.")
-parser.add_argument('-b', '--batch-size', type=int, default=200)
+parser.add_argument('-b', '--batch-size', type=int, default=1)
 parser.add_argument('--viz', action='store_true', help="Show plots while training")
 
 parser.add_argument('--save', type=str, default='experiments/', help="Path for save checkpoints")
@@ -60,6 +55,8 @@ parser.add_argument('-c', '--cut-tp', type=int, default=None, help="Cut out the 
 parser.add_argument('--quantization', type=float, default=0.1, help="Quantization on the physionet dataset."
 	"Value 1 means quantization by 1 hour, value 0.1 means quantization by 0.1 hour = 6 min")
 
+parser.add_argument('--use_film', action='store_true', help="Run End-to-End FiLM Extrapolation training")
+parser.add_argument('--use_time', action='store_true', help="Run FiLM + Time Extrapolation training")
 parser.add_argument('--latent-ode', action='store_true', help="Run Latent ODE seq2seq model")
 parser.add_argument('--use_gmm', action='store_true', help="Run Latent ODE with clusters inside latent space model")
 parser.add_argument('--use_flow', action='store_true', help="Run Latent ODE with clusters inside latent space model")
@@ -97,7 +94,7 @@ parser.add_argument('--seed', type = int, default = 15, help="Fix seed for repro
 parser.add_argument('--experiment', type = str, default = None, help="Fix experiment number for reproducibility")
 parser.add_argument('--patience', type=int, default=10000, help='Patience for early stopping')
 
-parser.add_argument('--smoothing_factor', type=float, default=0.01, help='Smoothing factor for EMA of test MSE')
+parser.add_argument('--smoothing_factor', type=float, default=0.99, help='Smoothing factor for EMA of test MSE')
 
 args = parser.parse_args()
 
@@ -133,7 +130,34 @@ if __name__ == '__main__':
 	utils.makedirs("results/")
 
 	##################################################################
-	data_obj = parse_datasets(args, device)
+	if args.use_film:
+		from lib.read_tacro import extract_gen_tac_film, TacroFilmDataset, collate_fn_tacro_film,
+		from torch.utils.data import DataLoader
+		ckpt_path = os.path.join(args.save, "experiment_film_" + str(experimentID) + '.ckpt')
+        # Load paired dataset
+		data_dict_train, scale = extract_gen_tac_film(file_path=[f"exp_run_all/exp_film_run/{args.experiment}/virtual_cohort_film_train.csv"])
+		data_dict_test, _ = extract_gen_tac_film(file_path=[f"exp_run_all/exp_film_run/{args.experiment}/virtual_cohort_film_test.csv"])
+		
+		max_out = {}
+		max_out['best_lambda'] = np.array(scale[1])
+		max_out['max_out']=  np.array(scale[0])
+		dataset_train = TacroFilmDataset(data_dict_train)
+		dataset_test = TacroFilmDataset(data_dict_test)
+        
+		train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True, collate_fn=lambda x: collate_fn_tacro_film(x, device))
+		test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False, collate_fn=lambda x: collate_fn_tacro_film(x, device))
+		
+		data_obj = {
+            "input_dim": 1,
+            "train_dataloader": utils.inf_generator(train_dataloader),
+            "test_dataloader": utils.inf_generator(test_dataloader),
+            "n_train_batches": len(train_dataloader),
+            "n_test_batches": len(test_dataloader),
+            "max_out" : max_out
+        }
+	else:
+        # Your normal dataset parsing
+		data_obj = parse_datasets(args, device)
 	input_dim = data_obj["input_dim"]
 
 	classif_per_tp = False
@@ -281,11 +305,16 @@ if args.use_gmm or args.use_gmm_v or args.use_flow:
 		utils.update_learning_rate(optimizer, decay_rate=0.999, lowest=args.lr/10)
 		
 		batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
-		
-		# FORCE KL_COEF = 0 so we only optimize MSE (Reconstruction)
-		train_res = model.compute_all_losses(batch_dict, n_traj_samples=3, kl_coef=0.0)
-		
-		# Backward pass
+    
+		if args.use_film:
+			
+			train_res = model.compute_film_losses(batch_dict, n_traj_samples=3, scaler = max_out)
+            # Optional: Print statement to watch the dual loss
+			# if itr % num_batches == 0:
+			# 	print(f"Epoch {itr//num_batches} | V1 Loss: {train_res['rec_loss_v1']:.4f} | V2 Loss: {train_res['rec_loss_v2']:.4f}")
+		else:
+			train_res = model.compute_all_losses(batch_dict, n_traj_samples=3)
+            
 		train_res["loss"].backward()
 		optimizer.step()
 		
@@ -348,9 +377,15 @@ for itr in range(1, num_batches * (args.niters + 1)):
     # else:
     #     # Reaches 5.0 quickly
     #     kl_coef = min(max_kl_beta, (epoch - wait_until_kl_inc) / 1)
-
-    batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
-    train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
+    # --- START OF BATCH FETCHING ---
+    if args.use_film:
+        batch_dict = utils.get_next_batch_film(data_obj["train_dataloader"])
+        train_res = model.compute_film_losses(batch_dict, n_traj_samples=3, kl_coef=kl_coef, max_out = data_obj["max_out"])
+    else:
+        batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
+        train_res = model.compute_all_losses(batch_dict, n_traj_samples=3, kl_coef=kl_coef)
+    # train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
+            
     train_res["loss"].backward()
     optimizer.step()
 
@@ -364,10 +399,26 @@ for itr in range(1, num_batches * (args.niters + 1)):
                 experimentID = experimentID,
                 device = device,
                 n_traj_samples = 10, kl_coef = kl_coef, data_obj = data_obj)
-            message = 'Epoch {:04d} [Test seq (cond on sampled tp)] | Loss {:.6f} | Likelihood {:.6f} | KL fp {:.4f} | FP STD {:.4f}|'.format(
-                itr//num_batches, 
-                test_res["loss"].item(), test_res["likelihood"].item(), 
-                test_res["kl_first_p"].item(), test_res["std_first_p"].item())
+            if hasattr(args, 'use_film') and args.use_film:
+                # Custom logging for FiLM showing V1 and V2 losses explicitly
+                
+                message = 'Epoch {:04d} [FiLM Test] | Total Loss {:.6f} | V1 MSE (Context) {:.6f} | V2 MSE (Extrap) {:.6f} | KL {:.4f} | auc {:6f}'.format(
+                    itr // num_batches, 
+                    test_res["loss"].item() if hasattr(test_res["loss"], 'item') else test_res["loss"],
+                    test_res["rec_loss_v1"].item() if hasattr(test_res["rec_loss_v1"], 'item') else test_res["rec_loss_v1"],
+                    test_res["rec_loss_v2"].item() if hasattr(test_res["rec_loss_v2"], 'item') else test_res["rec_loss_v2"],
+                    test_res["kl_loss"].item() if hasattr(test_res["kl_loss"], 'item') else test_res["kl_loss"],
+                    test_res["rmse_auc"].item() if hasattr(test_res["rmse_auc"], 'item') else test_res["rmse_auc"]
+                )
+            else:
+                # Original logging
+                message = 'Epoch {:04d} [Test seq (cond on sampled tp)] | Loss {:.6f} | Likelihood {:.6f} | KL fp {:.4f} | FP STD {:.4f}|'.format(
+                    itr // num_batches, 
+                    test_res["loss"].item() if hasattr(test_res["loss"], 'item') else test_res["loss"], 
+                    test_res["likelihood"].item() if hasattr(test_res["likelihood"], 'item') else test_res["likelihood"], 
+                    test_res["kl_first_p"].item() if hasattr(test_res["kl_first_p"], 'item') else test_res["kl_first_p"], 
+                    test_res["std_first_p"].item() if hasattr(test_res["std_first_p"], 'item') else test_res["std_first_p"]
+                )
         
             logger.info("Experiment " + str(experimentID))
             logger.info(message)
@@ -459,17 +510,26 @@ for itr in range(1, num_batches * (args.niters + 1)):
 
 
         # Plotting
-        if args.viz and itr%1000 == 0 :
+        if args.viz and itr % (10 * num_batches) == 0:
             with torch.no_grad():
-                test_dict = utils.get_next_batch(data_obj["test_dataloader"])
-
                 print("plotting....")
-                if isinstance(model, LatentODE) and (args.dataset == "periodic") or (args.dataset == "PK_Example") or (args.dataset == 'PK_Tacro') or (args.dataset == 'PK_MMF'):
-                    plot_id = itr // num_batches // n_iters_to_viz
-                    viz.draw_all_plots_one_dim(test_dict, model, 
-                        plot_name = file_name + "_" + str(experimentID) + "_{:03d}".format(plot_id) + ".png",
-                        experimentID = experimentID, save=True)
-                    plt.pause(0.01)
+                plot_id = itr // num_batches // n_iters_to_viz
+                
+                if hasattr(args, 'use_film') and args.use_film:
+                    test_dict = utils.get_next_batch_film(data_obj["test_dataloader"])
+                    
+                    viz.draw_all_plots_film(test_dict, model, 
+                        plot_name = file_name + "_" + str(experimentID) + "_film_{:03d}".format(plot_id) + ".png",
+                        experimentID = experimentID, save=True,
+                        scaler=data_obj.get("max_out", None))
+                else:
+                    test_dict = utils.get_next_batch(data_obj["test_dataloader"])
+                    if isinstance(model, LatentODE) and (args.dataset in ["periodic", "PK_Example", 'PK_Tacro', 'PK_MMF']):
+                        viz.draw_all_plots_one_dim(test_dict, model, 
+                            plot_name = file_name + "_" + str(experimentID) + "_{:03d}".format(plot_id) + ".png",
+                            experimentID = experimentID, save=True)
+                
+                plt.pause(0.01)
 
 torch.save({
     'args': args,

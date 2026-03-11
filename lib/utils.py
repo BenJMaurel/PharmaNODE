@@ -456,6 +456,7 @@ def get_next_batch(dataloader):
 	# Make the union of all time points and perform normalization across the whole dataset
 	data_dict = dataloader.__next__()
 	batch_dict = get_dict_template()
+	
 	# remove the time points where there are no observations in this batch
 	non_missing_tp = torch.sum(data_dict["observed_data"],(0,2)) != 0.
 	batch_dict["observed_data"] = data_dict["observed_data"][:, non_missing_tp]
@@ -505,7 +506,43 @@ def get_next_batch(dataloader):
 	batch_dict["mode"] = data_dict["mode"]
 	return batch_dict
 
+def get_next_batch_film(dataloader):
+    data_dict = dataloader.__next__()
+    batch_dict = {}
+    # V1 Encoder Input
+    non_missing_tp_v1_obs = torch.sum(data_dict["observed_data_v1"], (0, 2)) != 0.
+    batch_dict["observed_data_v1"] = data_dict["observed_data_v1"][:, non_missing_tp_v1_obs]
+    batch_dict["observed_tp_v1"] = data_dict["observed_tp_v1"][non_missing_tp_v1_obs]
+    batch_dict["dose_v1"] = data_dict["dose_v1"]
+    batch_dict["auc_red_v1"] = data_dict["auc_red_v1"]
+    batch_dict["others_v1"] = data_dict["others_v1"]
+    if "static_v1" in data_dict: batch_dict["static_v1"] = data_dict["static_v1"]
 
+    # V1 Target
+    non_missing_tp_v1_pred = torch.sum(data_dict["data_to_predict_v1"], (0, 2)) != 0.
+    batch_dict["data_to_predict_v1"] = data_dict["data_to_predict_v1"][:, non_missing_tp_v1_pred]
+    batch_dict["tp_to_predict_v1"] = data_dict["tp_to_predict_v1"][non_missing_tp_v1_pred]
+
+    # --- NEW: V2 Encoder Input ---
+    non_missing_tp_v2_obs = torch.sum(data_dict["observed_data_v2"], (0, 2)) != 0.
+    batch_dict["observed_data_v2"] = data_dict["observed_data_v2"][:, non_missing_tp_v2_obs]
+    batch_dict["observed_tp_v2"] = data_dict["observed_tp_v2"][non_missing_tp_v2_obs]
+    batch_dict["dose_v2"] = data_dict["dose_v2"]
+    batch_dict["auc_red_v2"] = data_dict["auc_red_v2"]
+    batch_dict["others_v2"] = data_dict["others_v2"]
+	
+    if "static_v2" in data_dict: batch_dict["static_v2"] = data_dict["static_v2"]
+
+    # V2 Target
+    non_missing_tp_v2_pred = torch.sum(data_dict["data_to_predict_v2"], (0, 2)) != 0.
+    batch_dict["data_to_predict_v2"] = data_dict["data_to_predict_v2"][:, non_missing_tp_v2_pred]
+    batch_dict["tp_to_predict_v2"] = data_dict["tp_to_predict_v2"][non_missing_tp_v2_pred]
+    
+    batch_dict["delta_t"] = data_dict["delta_t"]
+    batch_dict['t_v1'] = data_dict["t_v1"]
+    batch_dict["patient_ids"] = data_dict["patient_ids"]
+    
+    return batch_dict
 
 def get_ckpt_model(ckpt_path, model, device):
 	if not os.path.exists(ckpt_path):
@@ -777,101 +814,122 @@ def split_and_subsample_batch(data_dict, args, data_type = "train"):
 
 
 def compute_loss_all_batches(model,
-	test_dataloader, args,
-	n_batches, experimentID, device,
-	n_traj_samples = 1, kl_coef = 1., 
-	max_samples_for_eval = None, data_obj = None):
+    test_dataloader, args,
+    n_batches, experimentID, device,
+    n_traj_samples = 1, kl_coef = 1., 
+    max_samples_for_eval = None, data_obj = None):
 
-	total = {}
-	total["loss"] = 0
-	total["likelihood"] = 0
-	total["mse"] = 0
-	total['mse_cond'] = torch.tensor([0.0,0.0,0.0,0.0])
-	total["kl_first_p"] = 0
-	total["std_first_p"] = 0
-	total["pois_likelihood"] = 0
-	total["ce_loss"] = 0
-	total['rmse_auc'] = 0
-	n_test_batches = 0
-	
-	classif_predictions = torch.Tensor([]).to(device)
-	all_test_labels =  torch.Tensor([]).to(device)
+    total = {}
+    total["loss"] = 0
+    total["likelihood"] = 0
+    total["mse"] = 0
+    total['mse_cond'] = torch.tensor([0.0,0.0,0.0,0.0])
+    total["kl_first_p"] = 0
+    total["std_first_p"] = 0
+    total["pois_likelihood"] = 0
+    total["ce_loss"] = 0
+    total['rmse_auc'] = 0
+    
+    # Initialize keys specific to FiLM
+    if hasattr(args, 'use_film') and args.use_film:
+        total["rec_loss_v1"] = 0
+        total["rec_loss_v2"] = 0
+        total["kl_loss"] = 0
 
-	for i in range(n_batches):
-		# print("Computing loss... " + str(i))
-		batch_dict = get_next_batch(test_dataloader)
-		
-		results  = model.compute_all_losses(batch_dict,n_traj_samples = n_traj_samples, kl_coef = kl_coef, max_out = data_obj['max_out'])
-		if args.classif:
-			n_labels = model.n_labels #batch_dict["labels"].size(-1)
-			n_traj_samples = results["label_predictions"].size(0)
+    n_test_batches = 0
+    
+    classif_predictions = torch.Tensor([]).to(device)
+    all_test_labels =  torch.Tensor([]).to(device)
 
-			classif_predictions = torch.cat((classif_predictions, 
-				results["label_predictions"].reshape(n_traj_samples, -1, n_labels)),1)
-			all_test_labels = torch.cat((all_test_labels, 
-				batch_dict["labels"].reshape(-1, n_labels)),0)
+    for i in range(n_batches):
+        # Check for FiLM End-to-End mode ---
+        if hasattr(args, 'use_film') and args.use_film:
+            batch_dict = get_next_batch_film(test_dataloader)
+            results = model.compute_film_losses(batch_dict, n_traj_samples=n_traj_samples, kl_coef=kl_coef, max_out = data_obj.get('max_out', None))
+            
+            # Map FiLM results back to standard keys for the logger in run_models.py
+            results["mse"] = results["rec_loss_v2"] # We track extrapolation MSE as the primary MSE
+            results["likelihood"] = -results["rec_loss_v2"] # Mock likelihood for logging
+            results["kl_first_p"] = results["kl_loss"]
+            results["std_first_p"] = torch.tensor(0.0).to(device) # Placeholder
+            
+        else:
+            # --- ORIGINAL LOGIC ---
+            batch_dict = get_next_batch(test_dataloader)
+            results = model.compute_all_losses(batch_dict, n_traj_samples=n_traj_samples, kl_coef=kl_coef, max_out=data_obj.get('max_out', None))
+            
+        if args.classif:
+            n_labels = model.n_labels #batch_dict["labels"].size(-1)
+            n_traj_samples_class = results["label_predictions"].size(0)
 
-		for key in total.keys(): 
-			if key in results:
-				var = results[key]
-				if isinstance(var, torch.Tensor):
-					var = var.detach()
-				total[key] += var
+            classif_predictions = torch.cat((classif_predictions, 
+                results["label_predictions"].reshape(n_traj_samples_class, -1, n_labels)),1)
+            all_test_labels = torch.cat((all_test_labels, 
+                batch_dict["labels"].reshape(-1, n_labels)),0)
 
-		n_test_batches += 1
+        for key in total.keys(): 
+            if key in results:
+                var = results[key]
+                if isinstance(var, torch.Tensor):
+                    var = var.detach()
+                total[key] += var
 
-		# for speed
-		if max_samples_for_eval is not None:
-			if n_batches * batch_size >= max_samples_for_eval:
-				break
+        n_test_batches += 1
 
-	if n_test_batches > 0:
-		for key, value in total.items():
-			total[key] = total[key] / n_test_batches
+        # for speed
+        if max_samples_for_eval is not None:
+            # Assumes batch_size is an attribute on dataloader or passed, 
+            # safe fallback: break if we hit the max test limit
+            if n_batches * test_dataloader.batch_size >= max_samples_for_eval:
+                break
+
+    if n_test_batches > 0:
+        for key, value in total.items():
+            if isinstance(total[key], torch.Tensor) or isinstance(total[key], float) or isinstance(total[key], int):
+                total[key] = total[key] / n_test_batches
  
-	if args.classif:
-		if args.dataset == "physionet":
-			#all_test_labels = all_test_labels.reshape(-1)
-			# For each trajectory, we get n_traj_samples samples from z0 -- compute loss on all of them
-			all_test_labels = all_test_labels.repeat(n_traj_samples,1,1)
+    if args.classif:
+        if args.dataset == "physionet":
+            all_test_labels = all_test_labels.repeat(n_traj_samples_class,1,1)
 
+            idx_not_nan = ~torch.isnan(all_test_labels)
+            classif_predictions = classif_predictions[idx_not_nan]
+            all_test_labels = all_test_labels[idx_not_nan]
 
-			idx_not_nan = ~torch.isnan(all_test_labels)
-			classif_predictions = classif_predictions[idx_not_nan]
-			all_test_labels = all_test_labels[idx_not_nan]
+            dirname = "plots/" + str(experimentID) + "/"
+            import os
+            os.makedirs(dirname, exist_ok=True)
+            
+            total["auc"] = 0.
+            if torch.sum(all_test_labels) != 0.:
+                print("Number of labeled examples: {}".format(len(all_test_labels.reshape(-1))))
+                print("Number of examples with mortality 1: {}".format(torch.sum(all_test_labels == 1.)))
+                import sklearn as sk
+                # Cannot compute AUC with only 1 class
+                total["auc"] = sk.metrics.roc_auc_score(all_test_labels.cpu().numpy().reshape(-1), 
+                    classif_predictions.cpu().numpy().reshape(-1))
+            else:
+                print("Warning: Couldn't compute AUC -- all examples are from the same class")
+        
+        if args.dataset == "activity":
+            all_test_labels = all_test_labels.repeat(n_traj_samples_class,1,1)
 
-			dirname = "plots/" + str(experimentID) + "/"
-			os.makedirs(dirname, exist_ok=True)
-			
-			total["auc"] = 0.
-			if torch.sum(all_test_labels) != 0.:
-				print("Number of labeled examples: {}".format(len(all_test_labels.reshape(-1))))
-				print("Number of examples with mortality 1: {}".format(torch.sum(all_test_labels == 1.)))
+            labeled_tp = torch.sum(all_test_labels, -1) > 0.
 
-				# Cannot compute AUC with only 1 class
-				total["auc"] = sk.metrics.roc_auc_score(all_test_labels.cpu().numpy().reshape(-1), 
-					classif_predictions.cpu().numpy().reshape(-1))
-			else:
-				print("Warning: Couldn't compute AUC -- all examples are from the same class")
-		
-		if args.dataset == "activity":
-			all_test_labels = all_test_labels.repeat(n_traj_samples,1,1)
+            all_test_labels = all_test_labels[labeled_tp]
+            classif_predictions = classif_predictions[labeled_tp]
 
-			labeled_tp = torch.sum(all_test_labels, -1) > 0.
+            # classif_predictions and all_test_labels are in on-hot-encoding -- convert to class ids
+            _, pred_class_id = torch.max(classif_predictions, -1)
+            _, class_labels = torch.max(all_test_labels, -1)
 
-			all_test_labels = all_test_labels[labeled_tp]
-			classif_predictions = classif_predictions[labeled_tp]
-
-			# classif_predictions and all_test_labels are in on-hot-encoding -- convert to class ids
-			_, pred_class_id = torch.max(classif_predictions, -1)
-			_, class_labels = torch.max(all_test_labels, -1)
-
-			pred_class_id = pred_class_id.reshape(-1) 
-
-			total["accuracy"] = sk.metrics.accuracy_score(
-					class_labels.cpu().numpy(), 
-					pred_class_id.cpu().numpy())
-	return total
+            pred_class_id = pred_class_id.reshape(-1) 
+            import sklearn as sk
+            total["accuracy"] = sk.metrics.accuracy_score(
+                    class_labels.cpu().numpy(), 
+                    pred_class_id.cpu().numpy())
+            
+    return total
 
 def check_mask(data, mask):
 	#check that "mask" argument indeed contains a mask for data

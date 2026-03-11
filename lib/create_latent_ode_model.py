@@ -168,6 +168,8 @@ def create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device,
 		    use_binary_classif = args.classif,
 		    linear_classifier = args.linear_classif,
 		    classif_per_tp = classif_per_tp,
+			film = args.use_film,
+			film_time = args.use_time,
 		    n_labels = n_labels,
 		    train_classif_w_reconstr = (args.dataset == "physionet")
 		    ).to(device)

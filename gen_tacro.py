@@ -587,7 +587,8 @@ def generate_virtual_cohort(num_patients=10, scenario = 1):
             cyp_status=cyp_status,
             scenario = scenario
         )
-
+        
+        
         # Simulate to get concentration values
         sim_times = observation_times[observation_times > 0]
         # start_time = sim_times.min().item()
@@ -607,6 +608,14 @@ def generate_virtual_cohort(num_patients=10, scenario = 1):
             )*1000
         mask = torch.isin(all_sim_times, sim_times)
         true_concentrations = true_concentrations_all[mask]
+        CL_F = pk_model.individual_params['CL'].item()
+        Q_F = pk_model.individual_params['Q'].item()
+        Vc_F = pk_model.individual_params['Vc'].item()
+        Vp_F = pk_model.individual_params['Vp'].item()
+
+        k_elim = CL_F / Vc_F
+        k_12 = Q_F / Vc_F 
+        k_21 = Q_F / Vp_F
         # --- Structure the data for this patient ---
         patient_data = []
         if formulation == 'Prograf':    
@@ -645,10 +654,10 @@ def generate_virtual_cohort(num_patients=10, scenario = 1):
         concentrations = torch.clamp(concentrations, min=0.0)
         # 3. Add the subsequent concentration measurements
         if ii ==12.:
-            auc = np.trapz(true_concentrations_all.squeeze(-1)[(all_sim_times >= nbr_ss*24) & (all_sim_times <= (nbr_ss+1)*24 - 12)], all_sim_times[(all_sim_times >= (nbr_ss)*24) & (all_sim_times <= (nbr_ss+1)*24 - 12)] - (nbr_ss+1)*24.)
+            auc = np.trapezoid(true_concentrations_all.squeeze(-1)[(all_sim_times >= nbr_ss*24) & (all_sim_times <= (nbr_ss+1)*24 - 12)], all_sim_times[(all_sim_times >= (nbr_ss)*24) & (all_sim_times <= (nbr_ss+1)*24 - 12)] - (nbr_ss+1)*24.)
             ST = 1
         else:
-            auc = np.trapz(true_concentrations_all.squeeze(-1)[all_sim_times >= (nbr_ss)*24], all_sim_times[all_sim_times >= nbr_ss*24] - nbr_ss*24.)
+            auc = np.trapezoid(true_concentrations_all.squeeze(-1)[all_sim_times >= (nbr_ss)*24], all_sim_times[all_sim_times >= nbr_ss*24] - nbr_ss*24.)
             ST = 0
         # if auc < 100 or auc > 800:
         #     continue
@@ -657,11 +666,11 @@ def generate_virtual_cohort(num_patients=10, scenario = 1):
         patient_id = generated_patients
 
         patient_data.append({
-            'ID': patient_id, 'TIME': 0.0, 'DV': '.', 'AMT': pk_model.dose_mg, 'PERI': 1, 'CYP':CYP, 'II':ii, 'DRUG':formulation, 'nbr_ss': nbr_ss,'AUC': auc, 'mdv':1, 'ss':1, 'ST':ST, 'HT': hematocrit
+            'ID': patient_id, 'TIME': 0.0, 'DV': '.', 'AMT': pk_model.dose_mg, 'PERI': 1, 'CYP':CYP, 'II':ii, 'DRUG':formulation, 'nbr_ss': nbr_ss,'AUC': auc, 'mdv':1, 'ss':1, 'ST':ST, 'HT': hematocrit, 'K_ELIM': k_elim, 'K_12': k_12, 'K_21': k_21
         })
         for i in range(nbr_ss):
             patient_data.append({
-            'ID': patient_id, 'TIME': -ii*(i+1), 'DV': '.', 'AMT': pk_model.dose_mg, 'PERI': 1, 'CYP':CYP, 'II':ii, 'DRUG':formulation, 'AUC': auc, 'mdv':1, 'ss':1, 'ST':ST, 'HT': hematocrit
+            'ID': patient_id, 'TIME': -ii*(i+1), 'DV': '.', 'AMT': pk_model.dose_mg, 'PERI': 1, 'CYP':CYP, 'II':ii, 'DRUG':formulation, 'AUC': auc, 'mdv':1, 'ss':1, 'ST':ST, 'HT': hematocrit, 'K_ELIM': k_elim, 'K_12': k_12, 'K_21': k_21
         })
         for time, conc, true_conc in zip(sim_times.tolist(), concentrations.tolist(), true_concentrations.tolist()):
             # if ii <13 and time-144 > 13:
@@ -670,7 +679,7 @@ def generate_virtual_cohort(num_patients=10, scenario = 1):
             if conc[0] == 0:
                 conc[0] = true_conc[0]
             patient_data.append({
-                'ID': patient_id, 'TIME': time-nbr_ss*24, 'DV': conc[0], 'AMT': '.', 'PERI': 1, 'CYP':CYP, 'II':'.','nbr_ss': nbr_ss, 'DRUG':formulation, 'AUC': auc, 'mdv':0, 'ss':'.', 'ST':ST, 'HT' : hematocrit
+                'ID': patient_id, 'TIME': time-nbr_ss*24, 'DV': conc[0], 'AMT': '.', 'PERI': 1, 'CYP':CYP, 'II':'.','nbr_ss': nbr_ss, 'DRUG':formulation, 'AUC': auc, 'mdv':0, 'ss':'.', 'ST':ST, 'HT' : hematocrit, 'K_ELIM': k_elim, 'K_12': k_12, 'K_21': k_21
             })
         # patient_data = pd.DataFrame(patient_data)
         # # plt.plot(patient_data['TIME'], patient_data['DV'])
@@ -718,7 +727,7 @@ if __name__ == '__main__':
     # 2. Split the unique IDs into training (80%) and testing (20%) sets
     # random_state ensures the split is the same every time you run the code
     if args.first_at == 1:
-        train_ids, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
+        train_ids, test_ids = train_test_split(unique_ids, test_size=0.2, shuffle=False)
     elif args.first_at == 2:
         _, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
     else:

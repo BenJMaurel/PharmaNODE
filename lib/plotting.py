@@ -135,12 +135,31 @@ def plot_vector_field(ax, odefunc, latent_dim, device):
 
 def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=None, labels=None, plot_all = True, save_csv = True, patient_ids = None, args = None):
     # Create subplots: e.g., 4 rows x 7 cols (28 total)
-    rec_mean = np.mean(reconstructions, axis = 0)
-    pages = 7
+    def to_numpy(var):
+        if var is None:
+            return None
+        if torch.is_tensor(var):
+            return var.detach().cpu().numpy()
+        if isinstance(var, list):
+            # If it's a list of tensors, detach each one and stack
+            if len(var) > 0 and torch.is_tensor(var[0]):
+                return np.array([v.detach().cpu().numpy() for v in var])
+            return np.array(var)
+        return np.array(var)
+    data = to_numpy(data)
+    reconstructions = to_numpy(reconstructions)
+    time_steps = to_numpy(times)
+    time_steps_to_predict = to_numpy(times_pred)
+    auc_be = to_numpy(auc_be)
+    auc_red = to_numpy(auc_red)
+    
+    y_true_times = time_steps
+    rec_mean = np.mean(reconstructions, axis=0)
     nbr_plot = 10
+    pages = reconstructions.shape[1]//10
     if plot_all:
         for j in range(pages):
-            fig, axes = plt.subplots(2, 5, figsize=(15, 15), sharex=True, sharey=True)
+            fig, axes = plt.subplots(2, nbr_plot//2, figsize=(15, 15), sharex=True, sharey=True)
             axes = axes.flatten()
             for i in range(nbr_plot):
                 ax = axes[i]
@@ -470,6 +489,97 @@ class Visualizations():
 		xlim, ylim = self.plot_limits[name]
 		ax.set_xlim(xlim)
 		ax.set_ylim(ylim)
+            
+	def draw_all_plots_film(self, batch_dict, model, plot_name, experimentID=None, save=False, scaler=None):
+		"""
+        Visualizes the FiLM Extrapolation on the Original Scale.
+        """
+		import matplotlib.pyplot as plt
+		import os
+		import torch
+		from scipy.special import inv_boxcox
+		import numpy as np
+        
+		fig = plt.figure(figsize=(14, 10), facecolor='white')
+        
+        # Unpack the batch
+		data_v1 = batch_dict["observed_data_v1"]
+		tp_v1 = batch_dict["observed_tp_v1"]
+		data_v1_target = batch_dict["data_to_predict_v1"]
+		tp_v1_target = batch_dict["tp_to_predict_v1"]    
+		data_v2 = batch_dict["data_to_predict_v2"]
+		tp_v2 = batch_dict["tp_to_predict_v2"]
+		dose_v1 = batch_dict["dose_v1"]
+		dose_v2 = batch_dict["dose_v2"]
+		static_v1 = batch_dict["static_v1"]
+		delta_t = batch_dict.get("delta_t", None)
+        # Get Predictions
+		pred_x_v2, extra_info = model.get_reconstruction_extrapolation(
+            data_v1=data_v1, time_steps_v1=tp_v1, time_steps_v2=tp_v2,
+            dose_v1=dose_v1, dose_v2=dose_v2, time_steps_to_predict_v1=tp_v1_target, delta_t = delta_t,
+            static_v1=static_v1, n_traj_samples=1
+        )
+        
+        # Convert to numpy
+		pred_x_v2 = pred_x_v2.squeeze(0).cpu().numpy()
+		pred_x_v1 = extra_info["pred_x_v1"].squeeze(0).cpu().numpy()
+		data_v1_cpu = data_v1.cpu().numpy()
+		tp_v1_cpu = tp_v1.cpu().numpy()
+		data_v1_target_cpu = data_v1_target.cpu().numpy()
+		tp_v1_target_cpu = tp_v1_target.cpu().numpy()
+		data_v2_cpu = data_v2.cpu().numpy()
+		tp_v2_cpu = tp_v2.cpu().numpy()
+		dose_v1_cpu = dose_v1.cpu().numpy()
+		dose_v2_cpu = dose_v2.cpu().numpy()
+
+        # --- NEW: Inverse Scaling Function ---
+		def unscale(y):
+			if scaler is None: 
+				return y
+			if 'best_lambda' in scaler.keys():
+				y = inv_boxcox(y, scaler['best_lambda'])
+				# y = torch.nan_to_num(y, nan=0.0)
+			y = y*scaler['max_out']
+			return y
+        # Apply Unscaling
+		data_v1_cpu = unscale(data_v1_cpu)
+		data_v1_target_cpu = unscale(data_v1_target_cpu)
+		data_v2_cpu = unscale(data_v2_cpu)
+		pred_x_v1 = unscale(pred_x_v1)
+		pred_x_v2 = unscale(pred_x_v2)
+		
+		n_plots_to_draw = min(4, data_v1.size(0))
+		
+		for i in range(n_plots_to_draw):
+			ax = fig.add_subplot(2, 2, i+1)
+            
+			# Plot Visit 1 Observations
+			ax.plot(tp_v1_cpu, data_v1_cpu[i, :, 0], 'bX', label=f'V1 Obs (Dose: {dose_v1_cpu[i]:.2f})', markersize=8)
+			# Plot Visit 1 True Full Trajectory
+			ax.plot(tp_v1_target_cpu, data_v1_target_cpu[i, :, 0], 'b-', alpha=0.3, label='V1 True Full')
+			# Plot Visit 1 Base Prediction
+			ax.plot(tp_v1_target_cpu, pred_x_v1[i, :, 0], color='cyan', linestyle='--', label='V1 Base Pred', linewidth=2)
+			
+			# Plot Visit 2 Ground Truth
+			ax.plot(tp_v2_cpu, data_v2_cpu[i, :, 0], 'go', label=f'V2 True (Dose: {dose_v2_cpu[i]:.2f})', markersize=6)
+			ax.plot(tp_v2_cpu, data_v2_cpu[i, :, 0], 'g-', alpha=0.3)
+			# Plot Visit 2 FiLM Extrapolation Prediction
+			ax.plot(tp_v2_cpu, pred_x_v2[i, :, 0], 'r--', label='V2 FiLM Pred', linewidth=2)
+			
+			ax.set_title(f'Patient {i+1} Extrapolation')
+			ax.set_xlabel('Time (h)')
+			ax.set_ylabel('Concentration (Original Scale)')
+			ax.legend(fontsize=8, loc='upper right')
+			ax.grid(True, linestyle='--', alpha=0.6)
+
+		plt.tight_layout()
+		if save:
+			dirname = "plots/" + str(experimentID) + "/"
+			os.makedirs(dirname, exist_ok=True)
+			plt.savefig(dirname + plot_name)
+			plt.close(fig)
+		else:
+			plt.show()
 
 	def draw_one_density_plot(self, ax, model, data_dict, traj_id, 
 		multiply_by_poisson = False):
