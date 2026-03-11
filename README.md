@@ -14,9 +14,19 @@ The primary goal of this project is to demonstrate the effectiveness of NODEs in
 
 The codebase is designed to be modular, allowing for experimentation with different model configurations and datasets.
 
-<p align="center">
-<img align="middle" src="./assets/viz.gif" width="800" />
-</p>
+<!-- If you have a local visualization asset, you can re-enable it here. -->
+
+## Reproduce paper results (different scenarios / seeds)
+
+If your goal is to **recreate the results section with the different scenarios**, you should run:
+
+```bash
+bash run_everything.sh
+```
+
+This script is the **reference pipeline** used to reproduce the multi-run results: it loops over a seed range, generates data for a scenario, trains the model(s), runs evaluation, aggregates metrics, and finally runs the analysis.
+
+To change the scenarios/seeds/hyperparameters, edit the variables at the top of [`run_everything.sh`](run_everything.sh) (e.g. `START_SEED`, `END_SEED`, the `--scenario` passed to the generator, and the `BASE_COMMAND_*` strings).
 
 ## Prerequisites
 
@@ -55,13 +65,13 @@ You can install them in R using the following command:
 install.packages(c("argparse", "tidyverse", "mrgsolve", "mapbayr", "MESS", "lixoftConnectors", "glue", "furrr"))
 ```
 
-**Note:** `lixoftConnectors` is crucial for interfacing R with Monolix. Ensure it is correctly installed and compatible with your Monolix version. The `run_everything.sh` script will initialize this connector using the path provided via `--monolix-path`.
+**Note:** `lixoftConnectors` is crucial for interfacing R with Monolix. Ensure it is correctly installed and compatible with your Monolix version. If your Monolix installation is not auto-detected, you may need to edit the R-side configuration (see the R scripts invoked by `run_everything.sh`, e.g. `all_run_tacro.r`).
 
 ### Monolix
 
 A working installation of Monolix is required to run the comparative pharmacometric models. You can find installation instructions on the [Lixoft website](https://lixoft.com/products/monolix-suite/).
 
-When running the full pipeline (`run_everything.sh`), you must provide the path to the Monolix installation directory (specifically the `monolixSuite` executable or directory containing it) so that the R scripts can locate and utilize the Monolix engine.
+When running the full pipeline (`run_everything.sh`), the R scripts must be able to locate your Monolix installation (specifically the `monolixSuite` executable or the directory containing it). If it’s not detected automatically on your system, set the path in the R-side configuration used by the scripts (e.g. `all_run_tacro.r`).
 
 ### Guix
 
@@ -86,6 +96,109 @@ The models consume data from CSV files, which should be structured to be compati
 - **`AUC`**: The Area Under the Curve, representing the total drug exposure over a dosing interval. This is often the target variable for prediction.
 
 The `gen_tacro.py` script can be used to generate synthetic data that follows this structure, which is useful for testing the models without access to clinical data.
+
+## Custom workflow (generate data → train → test/plots)
+
+Use this if you want a **custom experiment** instead of the full “paper reproduction” pipeline. The safest way to get the **exact argument structure** is to copy the relevant command lines from [`run_everything.sh`](run_everything.sh).
+
+### 1) Generate data
+
+#### Standard Tacrolimus dataset
+
+`gen_tacro.py` generates a single-visit dataset.
+
+```bash
+python3 gen_tacro.py --exp 12345 --num_patients 1000 --first_at 1 --scenario 3
+```
+
+#### FiLM dataset (2 visits per patient)
+
+`gen_tacro_film.py` generates **two visits per patient** (Visit 1 and Visit 2) so you can compare them (dose extrapolation).
+
+```bash
+python3 gen_tacro_film.py --exp 12345 --num_patients 1000 --scenario 2
+```
+
+This writes FiLM CSVs under:
+- `exp_run_all/exp_film_run/12345/virtual_cohort_film_train.csv`
+- `exp_run_all/exp_film_run/12345/virtual_cohort_film_test.csv`
+
+### 2) Train a model (`run_models.py`)
+
+#### Standard (non-FiLM) training
+
+```bash
+python3 run_models.py \
+  --niters 6000 -n 200 -s 40 -l 10 \
+  --dataset PK_Tacro --latent-ode \
+  --noise-weight 0.01 --max-t 5. \
+  --seed 101 \
+  --experiment 12345
+```
+
+#### FiLM training (paired visits)
+
+Add `--use_film` and ensure `--experiment` points to the FiLM dataset folder name you generated above.
+
+```bash
+python3 run_models.py \
+  --niters 6000 -n 200 -s 40 -l 10 \
+  --dataset PK_Tacro --latent-ode --use_film \
+  --noise-weight 0.01 --max-t 5. \
+  --seed 101 \
+  --experiment 12345
+```
+
+### 3) Evaluate / test
+
+#### Test a standard model (`test_model.py`)
+
+`test_model.py` loads a checkpoint by **experiment ID** (it expects `experiments/experiment_<ID>.ckpt`).
+
+```bash
+python3 test_model.py \
+  -n 200 -s 40 -l 10 \
+  --dataset PK_Tacro --latent-ode \
+  --noise-weight 0.01 --max-t 5. \
+  --seed 101 \
+  --load 12345
+```
+
+#### Test a FiLM model (`test_film.py`)
+
+`test_film.py` loads a checkpoint by **path** (not by numeric ID). By default, FiLM training writes `experiments/experiment_film_<ID>.ckpt`.
+
+```bash
+python3 test_film.py \
+  -n 200 -s 40 -l 10 \
+  --dataset PK_Tacro --latent-ode \
+  --noise-weight 0.01 --max-t 5. \
+  --seed 101 \
+  --exp exp_film_run/12345 \
+  --load experiments/experiment_film_12345.ckpt
+```
+
+### 4) Plots
+
+Once trained/tested, you can create plots using the existing plotting scripts (entry points may vary depending on what you want to visualize):
+- `plot_test.py`
+- `various_plot.py`
+- `plot_latent_space.py`
+- `visualize_scenari.py`
+
+## Latent space visualization / sampling
+
+Example (copy-paste) command to visualize / generate samples from the latent space:
+
+```bash
+python3 generate_from_latent.py \
+  -n 200 -s 40 -l 10 \
+  --dataset PK_Tacro --latent-ode \
+  --noise-weight 0.01 --max-t 5. \
+  --seed 1 \
+  --load 37614 \
+  --experiment 37614
+```
 
 ## Output and Results
 
@@ -182,17 +295,4 @@ The script executes the following steps sequentially for a range of random seeds
 
 ### Configuration
 
-You can customize the behavior of the script using the following command-line arguments:
-
-- `--main-output-dir <path>`: Specifies the main directory where all experiment outputs will be stored. Defaults to `exp_run_all`.
-- `--monolix-path <path>`: **Critical.** Sets the path to your Monolix installation. This is passed to the R scripts to initialize `lixoftConnectors`. Defaults to `/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite`. You should update this to point to your specific Monolix installation.
-- `--model-file <path>`: Defines the path to the Monolix model file (`.txt`) to be used for the analysis.
-
-### Example Usage
-
-```bash
-bash run_everything.sh \
-  --main-output-dir "results_v1" \
-  --monolix-path "/opt/MonolixSuite2024R1/lib/monolixSuite" \
-  --model-file "models/tacrolimus_model.txt"
-```
+`run_everything.sh` is a plain bash script (it does not currently parse CLI flags). Customize it by editing the variables and command strings inside the file (seed range, scenario number, `BASE_COMMAND_TRAIN`, `BASE_COMMAND_TEST`, etc.).
