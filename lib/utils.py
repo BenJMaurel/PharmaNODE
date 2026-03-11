@@ -67,15 +67,14 @@ def initialize_gmm_with_kmeans(model, data_obj, device, n_batches=20):
     model.eval()
     z0_collection = []
     
-    # We use the train_dataloader to get a representative sample
-    # Note: We assume utils.get_next_batch is available or we iterate manually
-    # For safety with your utils structure, we'll just loop n_batches times
+    # Use the train_dataloader to get a representative sample.
+    # Loop up to n_batches times for compatibility with the existing utils structure.
     with torch.no_grad():
         for i in range(n_batches):
             try:
                 batch_dict = get_next_batch(data_obj["train_dataloader"])
             except StopIteration:
-                # If loader is exhausted, just stop
+                # Stop early if the loader is exhausted
                 break
             
             # Forward pass to get 'info' which contains the encoder output

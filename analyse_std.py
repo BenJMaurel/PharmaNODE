@@ -144,8 +144,6 @@ def create_boxplots(metrics, output_filename="model_performance_boxplots_all.png
     print("\n--- Generating Box Plots ---")
     
     sns.set_theme(style="whitegrid", context="paper", font_scale=1.2)
-
-    # ✨ REMOVED sharey=True from this line
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
     # fig.suptitle('Distribution of Model Performance Metrics Across Runs', fontsize=16)
 
@@ -177,7 +175,7 @@ def create_boxplots(metrics, output_filename="model_performance_boxplots_all.png
         axes[1].axhline(0, color='gray', linestyle='--', linewidth=1.5)
         axes[1].set_title('RMSE vs. RMSE BE')
         axes[1].set_xlabel('')
-        # ✨ RE-ADDED the y-label for the second, independent axis
+        # Ensure the second axis has its own y-label for clarity
         axes[1].set_ylabel('Value') 
     else:
         axes[1].text(0.5, 0.5, 'Not enough data for RMSE plot', ha='center', va='center')

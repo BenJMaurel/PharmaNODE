@@ -319,7 +319,7 @@ if __name__ == '__main__':
             label='Real Data', zorder=2
         )
     else:
-        # If no generated samples, just plot the real data
+        # If no generated samples are available, plot only the real data
         scatter = ax.scatter(
             embedding_real[:, 0], embedding_real[:, 1], 
             c=real_labels, cmap='RdBu_r', 

@@ -26,12 +26,21 @@ parser$add_argument("--output_dir", type = "character", default = ".",
 parser$add_argument("--cores", type = "integer", default = 1,
                     help = "Number of CPU cores to use for parallel processing [default: 1]")
 parser$add_argument("--experiment", type = "character", default = ".",
-                    help = "Directory to save the output PDF and CSV files [default: current directory]")
-args <- parser$parse_args()
+                    help = "Experiment identifier used for naming outputs [default: current directory]")
+parser$add_argument("--monolix_path", type = "character", default = NULL,
+                    help = "Path to the Monolix Suite installation (directory containing monolixSuite).")
 
 args <- parser$parse_args()
+
 message("Defining the tacrolimus pharmacokinetic model...")
-initializeLixoftConnectors(software = 'monolix', path = "/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite")
+
+monolix_path <- args$monolix_path
+if (is.null(monolix_path) || monolix_path == "") {
+  # Sensible default for macOS; override via --monolix_path on other systems
+  monolix_path <- "/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite"
+}
+
+initializeLixoftConnectors(software = "monolix", path = monolix_path)
 # 3. Define the path to your Monolix project file
 # model_file_path   <- "~/model_tacro.txt"
 model_file_path   <- "test_model.txt"

@@ -10,7 +10,13 @@ To install the required Python packages, you can use pip and the `requirements.t
 pip install -r requirements.txt
 ```
 
-This will install the following packages:
+This will install all required Python packages for:
+
+- Core training, evaluation, and analysis scripts.
+- Optional visualizations (UMAP, Plotly/Dash dashboards).
+
+Key packages include:
+
 - torch
 - torchdiffeq
 - numpy
@@ -19,6 +25,12 @@ This will install the following packages:
 - scikit-learn
 - seaborn
 - tensorboard
+- scipy
+- umap-learn
+- plotly
+- dash
+- chardet
+- torchvision
 
 ## R Dependencies
 
@@ -50,8 +62,12 @@ This project requires Monolix for pharmacokinetic/pharmacodynamic (PK/PD) modeli
 
 2.  **Set the Monolix Path:**
     - The `run_everything.sh` script requires the path to your Monolix installation.
-    - You can provide this path using the `--monolix-path` command-line argument.
+    - You must provide this path using the `--monolix-path` command-line argument.
     - For example:
       ```bash
-      ./run_everything.sh --monolix-path "/path/to/your/MonolixSuite/lixoft/monolix/bin"
+      bash run_everything.sh --monolix-path "/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite"
+      ```
+      or on Linux:
+      ```bash
+      bash run_everything.sh --monolix-path "/opt/monolixSuite2024R1/monolixSuite"
       ```

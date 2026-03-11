@@ -16,12 +16,35 @@ The codebase is designed to be modular, allowing for experimentation with differ
 
 <!-- If you have a local visualization asset, you can re-enable it here. -->
 
+## Quickstart (from a clean environment)
+
+### 1. Create and activate a virtual environment (recommended)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+### 2. Install Python dependencies
+
+All required Python packages (including `torchdiffeq`, `scipy`, `umap-learn`, `plotly`, `dash`, etc.) are listed in `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
+
+> **Note:** You may prefer to install a GPU-enabled build of PyTorch following the official instructions and then run `pip install -r requirements.txt` with `torch` removed from that file.
+
+### 3. Install R packages and Monolix (for full paper reproduction)
+
+To reproduce the **full pipeline including the Monolix benchmark**, you also need R, the R packages listed below, and a working Monolix installation (see **Prerequisites** for details). If you only want to run the Python NODE models and plots, R/Monolix are not strictly required.
+
 ## Reproduce paper results (different scenarios / seeds)
 
 If your goal is to **recreate the results section with the different scenarios**, you should run:
 
 ```bash
-bash run_everything.sh
+bash run_everything.sh --monolix-path "/absolute/path/to/monolixSuite"
 ```
 
 This script is the **reference pipeline** used to reproduce the multi-run results: it loops over a seed range, generates data for a scenario, trains the model(s), runs evaluation, aggregates metrics, and finally runs the analysis.
@@ -40,11 +63,10 @@ Install the necessary Python packages using pip:
 pip install -r requirements.txt
 ```
 
-Additionally, `torchdiffeq` must be installed from its source:
+This installs all Python dependencies needed for:
 
-```bash
-pip install git+https://github.com/rtqichen/torchdiffeq.git
-```
+- **Core pipeline**: data generation, NODE model training and testing, and basic analysis scripts.
+- **Optional extras**: UMAP-based latent visualizations, interactive Plotly/Dash dashboards, and the analysis utilities.
 
 ### R Dependencies
 
@@ -69,9 +91,14 @@ install.packages(c("argparse", "tidyverse", "mrgsolve", "mapbayr", "MESS", "lixo
 
 ### Monolix
 
-A working installation of Monolix is required to run the comparative pharmacometric models. You can find installation instructions on the [Lixoft website](https://lixoft.com/products/monolix-suite/).
+A working installation of Monolix is required to run the comparative pharmacometric models and reproduce the paper’s benchmark tables.
 
-When running the full pipeline (`run_everything.sh`), the R scripts must be able to locate your Monolix installation (specifically the `monolixSuite` executable or the directory containing it). If it’s not detected automatically on your system, set the path in the R-side configuration used by the scripts (e.g. `all_run_tacro.r`).
+- Install Monolix Suite from the [Lixoft website](https://lixoft.com/products/monolix-suite/).
+- Locate the `monolixSuite` executable (or the directory containing it):
+  - **macOS example**: `/Applications/MonolixSuite2024R1.app/Contents/Resources/monolixSuite`
+  - **Linux example**: `/opt/monolixSuite2024R1/monolixSuite`
+
+You pass this path to the pipeline via the `--monolix-path` flag of `run_everything.sh` (see **Pipeline Automation** below). Internally, it is forwarded to the R script (`all_run_tacro.r`) and used by `lixoftConnectors::initializeLixoftConnectors`.
 
 ### Guix
 
@@ -213,6 +240,22 @@ Inside each experiment directory, you will find:
 
 Aggregated test results from all experiment runs are compiled into a single file: `exp_run_all/test_gen_tacro_corrected.txt`. This file contains key performance metrics, such as RMSE and prediction errors, making it easy to compare results across different runs.
 
+### Minimal smoke test (from a fresh environment)
+
+After installing dependencies as described above, you can run a quick end‑to‑end test with reduced workload:
+
+```bash
+python3 gen_tacro_film.py --exp 12345 --num_patients 50 --scenario 2
+python3 run_models.py --niters 10 -n 50 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5. --seed 101 --experiment 12345
+python3 test_model.py -n 50 -s 40 -l 10 --dataset PK_Tacro --latent-ode --noise-weight 0.01 --max-t 5. --seed 101 --load 12345
+```
+
+This sequence:
+
+- Generates a small synthetic FiLM cohort.
+- Trains a NODE model for a few iterations.
+- Runs the evaluation script on the resulting checkpoint to verify everything is wired correctly.
+
 ## Running Individual Models (`run_models.py`)
 
 The `run_models.py` script is the core Python entry point for training and evaluating the Neural ODE models and baselines. It allows for fine-grained control over model architecture, training hyperparameters, and dataset selection.
@@ -277,22 +320,36 @@ python run_models.py --dataset PK_Tacro --latent-ode --use_flow --save experimen
 
 The main experimental workflow is managed by the `run_everything.sh` script. This script automates the entire lifecycle of an experiment, from data generation to analysis.
 
-To run the full pipeline, execute the script from the root of the repository:
+To run the full pipeline from the root of the repository (including the Monolix benchmark), use:
 
 ```bash
-bash run_everything.sh
+bash run_everything.sh \
+  --monolix-path "/absolute/path/to/monolixSuite" \
+  --start-seed 101 \
+  --end-seed 201 \
+  --scenario 2 \
+  --cores 10 \
+  --main-output-dir "exp_run_all"
 ```
+
+At minimum you must provide a valid `--monolix-path` for your system; the other flags have sensible defaults.
 
 ### Workflow
 
-The script executes the following steps sequentially for a range of random seeds:
+For each seed in the specified range, the script executes:
 
-1.  **Data Generation (`gen_tacro.py`)**: Generates synthetic patient data with specified parameters (e.g., number of patients, first dose time).
-2.  **Monolix Training (`all_run_tacro.R`)**: Uses R and the `lixoftConnectors` package to train a Monolix model on the generated data. This step requires a valid Monolix installation path.
+1.  **Data Generation (`gen_tacro_film.py`)**: Generates synthetic FiLM datasets under `exp_run_all/exp_film_run/<EXP_ID>`.
+2.  **Monolix Training (`all_run_tacro.r`)**: Uses R and the `lixoftConnectors` package to configure and run a Monolix model on the generated data, writing outputs into `<main-output-dir>/<EXP_ID>`.
 3.  **NODE Training (`run_models.py`)**: Trains the Neural ODE model using the Python environment.
 4.  **Testing (`test_model.py`)**: Evaluates the trained NODE model on a test set and records metrics like RMSE and prediction error.
 5.  **Analysis (`analyse_std.py`)**: After all runs are complete, this script aggregates and analyzes the results from all seeds.
 
 ### Configuration
 
-`run_everything.sh` is a plain bash script (it does not currently parse CLI flags). Customize it by editing the variables and command strings inside the file (seed range, scenario number, `BASE_COMMAND_TRAIN`, `BASE_COMMAND_TEST`, etc.).
+`run_everything.sh` now accepts the following CLI flags:
+
+- `--monolix-path` (required for full pipeline): Directory containing the `monolixSuite` executable.
+- `--start-seed`, `--end-seed`: Inclusive seed range for repeated experiments.
+- `--scenario`: Scenario index passed to `gen_tacro_film.py` (e.g. `2` or `3`, as in the paper).
+- `--cores`: Number of CPU cores to pass to the R analysis (`all_run_tacro.r`).
+- `--main-output-dir`: Root directory for experiment outputs (default: `exp_run_all`).

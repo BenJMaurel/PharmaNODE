@@ -6,3 +6,9 @@ pandas
 scikit-learn
 seaborn
 tensorboard
+scipy
+umap-learn
+plotly
+dash
+chardet
+torchvision

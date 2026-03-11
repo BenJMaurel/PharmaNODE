@@ -209,9 +209,7 @@ def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=
             # This avoids cluttering the first subplot. We place it at the top of the figure.
             fig.legend(handles=[line1, line2], loc='upper center', ncol=2, fontsize='x-large', bbox_to_anchor=(0.5, 1.0))
             
-            # 3. ADJUST LAYOUT SPACING
-            # - hspace increases the vertical space between rows of plots.
-            # - rect=[0, 0, 1, 0.98] makes room at the top for the figure legend.
+            # Adjust layout spacing so the figure legend fits above the subplots.
             plt.tight_layout(rect=[0, 0, 1, 0.98])
             plt.subplots_adjust(hspace=0.4)
             try:
@@ -240,8 +238,7 @@ def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=
             
             # Calculate statistics (mean and bounds) for the prediction curves
             mean_pred = np.mean(patient_reconstructions, axis=0)
-            # Note: Your original code used 1.0 and 99.0, which is a 98% interval.
-            # I'll use 2.5 and 97.5 for a true 95% interval.
+            # Use 2.5 and 97.5 percentiles here to obtain a 95% interval (instead of 1.0 and 99.0).
             lower_bound = np.percentile(patient_reconstructions, 2.5, axis=0)
             upper_bound = np.percentile(patient_reconstructions, 97.5, axis=0)
             
