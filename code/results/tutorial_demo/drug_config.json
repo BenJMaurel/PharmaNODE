@@ -1,0 +1,53 @@
+{
+  "exp_id": "tutorial_demo",
+  "output_dir": null,
+  "population_params": {},
+  "ipv_omega": {},
+  "residual_prop_sd": 0.15,
+  "residual_add_sd": 0.05,
+  "unit_scale": 1.0,
+  "dose_choices": [
+    50.0,
+    75.0,
+    100.0,
+    150.0
+  ],
+  "dosing_interval_h": 24.0,
+  "n_steady_state_cycles": 6,
+  "observation_times": [
+    0.0,
+    0.33,
+    0.67,
+    1.0,
+    1.5,
+    2.0,
+    3.0,
+    4.0,
+    6.0,
+    9.0,
+    12.0,
+    24.0
+  ],
+  "sparse_times": [
+    0.0,
+    2.0,
+    8.0
+  ],
+  "auc_window": [
+    0.0,
+    24.0
+  ],
+  "covariate_columns": [
+    "WT"
+  ],
+  "wt_range": [
+    50.0,
+    100.0
+  ],
+  "static_feature_names": [
+    "dose_norm",
+    "wt_norm",
+    "pad"
+  ],
+  "others_columns": []
+}

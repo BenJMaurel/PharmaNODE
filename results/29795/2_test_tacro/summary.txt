@@ -1,0 +1,45 @@
+********************************************************************************
+*                          2_test_tacro.mlxtran                                *
+*                          April 30, 2026 at 15:03:45                          *
+*                          Monolix version : 2024R1                            *
+********************************************************************************
+
+
+ESTIMATION OF THE POPULATION PARAMETERS ________________________________________
+
+Fixed Effects ----------------------------
+CL_pop        :                       15.5
+beta_CL_CYP_1 :                       0.86
+Vc_pop        :                   0.000376
+beta_Vc_ST_1  :                      -2.76
+KTR_pop       :                       1.49
+beta_KTR_ST_1 :                      0.779
+Vp_pop        :                        573
+Q_pop         :                        232
+
+Standard Deviation of the Random Effects -
+omega_CL      :                       0.41
+omega_Vc      :                       3.81
+omega_KTR     :                      0.221
+omega_Vp      :                      0.609
+omega_Q       :                      0.381
+
+Error Model Parameters -------------------
+a             :                       0.35
+b             :                      0.164
+
+Elapsed time (seconds):  3.8e+02
+CPU time     (seconds):  3.3e+03
+Exploratory phase iterations:      259 (Autostop)
+Smoothing phase iterations:        143 (Autostop)
+
+ _______________________________________________________________________________
+
+
+
+
+DATASET INFORMATION
+Number of individuals: 8
+Number of observations (DV): 96
+Number of doses: 56
+

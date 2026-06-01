@@ -1,0 +1,143 @@
+import json
+
+nb = {
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## PharmaNODE — FiLM Pipeline Tutorial\n",
+    "\n",
+    "This tutorial demonstrates how to use `DrugStudyConfig` and `ClassicPKModel` to generate a **FiLM-compatible** dataset (paired visits per patient) and train a Latent ODE with FiLM conditioning.\n",
+    "\n",
+    "### 1. Define the Configuration"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import random\n",
+    "import torch\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "from IPython.display import display\n",
+    "from lib.pk_drug import DrugStudyConfig, generate_virtual_cohort_film, save_cohort_splits\n",
+    "from lib.classic_pk import ClassicPKModel\n",
+    "\n",
+    "config = DrugStudyConfig(\n",
+    "    exp_id=\"tutorial_film\",\n",
+    "    population_params={\"CL\": 10.0, \"Vc\": 50.0, \"ka\": 1.2},\n",
+    "    ipv_omega={\"CL\": 0.25, \"Vc\": 0.2, \"ka\": 0.2},\n",
+    "    residual_prop_sd=0.10,\n",
+    "    residual_add_sd=0.01,\n",
+    "    dose_choices=[20.0, 30.0, 40.0, 50.0],\n",
+    "    dosing_interval_h=24.0,\n",
+    "    n_steady_state_cycles=4,\n",
+    "    observation_times=[0.0, 0.33, 0.67, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 9.0, 12.0, 24.0],\n",
+    "    sparse_times=[0.0, 1.0, 3.0], # FiLM default\n",
+    "    covariate_columns=[\"WT\"]\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### 2. Generate Paired Visits Dataset\n",
+    "`generate_virtual_cohort_film` automatically generates Visit 1 and Visit 2 for each patient, sharing their base PK parameters but applying different doses."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def pk_factory(meta: dict):\n",
+    "    model = ClassicPKModel(n_compartments=1, absorption='oral', cov_data=meta, pop_params=config.population_params, ipv=config.ipv_omega)\n",
+    "    return model\n",
+    "\n",
+    "random.seed(42)\n",
+    "np.random.seed(42)\n",
+    "torch.manual_seed(42)\n",
+    "\n",
+    "cohort_df = generate_virtual_cohort_film(pk_factory, config, num_patients=200)\n",
+    "\n",
+    "train_df, test_df = save_cohort_splits(cohort_df, config, test_size=0.2)\n",
+    "print(\"Saved train and test CSVs for FiLM in:\", config.results_path)\n",
+    "display(cohort_df.head())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### 3. Build FiLM Dataloaders\n",
+    "We use `extract_gen_pk_film` and `TacroFilmDataset` to parse the paired visits."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from lib.pk_drug import extract_gen_pk_film\n",
+    "from lib.read_tacro import TacroFilmDataset, collate_fn_tacro_film\n",
+    "from torch.utils.data import DataLoader\n",
+    "\n",
+    "data_dict, scaler = extract_gen_pk_film(config)\n",
+    "print(\"Scaler max_out, boxcox lambda:\", scaler)\n",
+    "\n",
+    "dataset = TacroFilmDataset(data_dict)\n",
+    "loader = DataLoader(\n",
+    "    dataset,\n",
+    "    batch_size=min(16, len(dataset)),\n",
+    "    shuffle=False,\n",
+    "    collate_fn=lambda b: collate_fn_tacro_film(b, device=torch.device(\"cpu\")),\n",
+    ")\n",
+    "batch = next(iter(loader))\n",
+    "print(\"Observed v1 shape:\", batch[\"observed_data_v1\"].shape)\n",
+    "print(\"Observed v2 shape:\", batch[\"observed_data_v2\"].shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### 4. Smoke-test FiLM Training\n",
+    "We run `run_models.py` with `--dataset PK_Generic` and `--use_film`."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "!python run_models.py --niters 5000 -n 50 -s 40 -l 10 --dataset PK_Generic --latent-ode --use_film \\\n",
+    "  --noise-weight 0.01 --max-t 5. --seed 101 --experiment tutorial_film -b 32"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python",
+   "version": "3.11"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
+
+with open("docs/02_classic_pk_film.ipynb", "w") as f:
+    json.dump(nb, f, indent=1)

@@ -1,0 +1,82 @@
+<DATAFILE>
+
+[FILEINFO]
+file={path='virtual_cohort_train.csv'}
+delimiter = comma
+header={ID, TIME, DV, AMT, PERI, CYP, II, DRUG, nbr_ss, AUC, mdv, ss, ST, HT, K_ELIM, K_12, K_21}
+
+[CONTENT]
+ID = {use=identifier}
+TIME = {use=time}
+DV = {use=observation, type=continuous}
+AMT = {use=amount}
+CYP = {use=covariate, type=categorical}
+ST = {use=covariate, type=categorical}
+
+<MODEL>
+
+[COVARIATE]
+input = {CYP, ST}
+
+CYP = {type=categorical, categories={'0', '1'}}
+ST = {type=categorical, categories={'0', '1'}}
+
+[INDIVIDUAL]
+input = {CL_pop, omega_CL, KTR_pop, omega_KTR, Q_pop, omega_Q, Vc_pop, omega_Vc, Vp_pop, omega_Vp, CYP, beta_CL_CYP_1, ST, beta_Vc_ST_1, beta_KTR_ST_1}
+
+CYP = {type=categorical, categories={'0', '1'}}
+ST = {type=categorical, categories={'0', '1'}}
+
+DEFINITION:
+CL = {distribution=logNormal, typical=CL_pop, covariate=CYP, coefficient={0, beta_CL_CYP_1}, sd=omega_CL}
+KTR = {distribution=logNormal, typical=KTR_pop, covariate=ST, coefficient={0, beta_KTR_ST_1}, sd=omega_KTR}
+Q = {distribution=logNormal, typical=Q_pop, sd=omega_Q}
+Vc = {distribution=logNormal, typical=Vc_pop, covariate=ST, coefficient={0, beta_Vc_ST_1}, sd=omega_Vc}
+Vp = {distribution=logNormal, typical=Vp_pop, sd=omega_Vp}
+
+[LONGITUDINAL]
+input = {a, b}
+
+file = '../../code/test_model.txt'
+
+DEFINITION:
+DV = {distribution=normal, prediction=CONC, errorModel=combined1(a, b)}
+
+<FIT>
+data = 'DV'
+model = DV
+
+<PARAMETER>
+CL_pop = {value=1, method=MLE}
+KTR_pop = {value=1, method=MLE}
+Q_pop = {value=1, method=MLE}
+Vc_pop = {value=1, method=MLE}
+Vp_pop = {value=1, method=MLE}
+a = {value=1, method=MLE}
+b = {value=0.3, method=MLE}
+beta_CL_CYP_1 = {value=0, method=MLE}
+beta_KTR_ST_1 = {value=0, method=MLE}
+beta_Vc_ST_1 = {value=0, method=MLE}
+c = {value=1, method=FIXED}
+omega_CL = {value=1, method=MLE}
+omega_KTR = {value=1, method=MLE}
+omega_Q = {value=1, method=MLE}
+omega_Vc = {value=1, method=MLE}
+omega_Vp = {value=1, method=MLE}
+
+<MONOLIX>
+
+[TASKS]
+populationParameters()
+individualParameters(method = {conditionalMean, conditionalMode })
+fim(run = false,method = StochasticApproximation)
+logLikelihood(run = false,method = ImportanceSampling)
+
+[PLOTS]
+run = true
+plots = {indfits = {selected = true}, parameterdistribution = {selected = true}, obspred = {selected = true}, covariancemodeldiagnosis = {selected = true}, covariatemodeldiagnosis = {selected = true}, vpc = {selected = true}, residualsscatter = {selected = true}, residualsdistribution = {selected = true}, randomeffects = {selected = true}, saemresults = {selected = true}}
+
+[SETTINGS]
+GLOBAL:
+exportpath = '2_test_tacro'
+
