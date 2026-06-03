@@ -6,7 +6,7 @@
 
 Want to see PharmaNODE in action right now? We have set up a live interactive web app so you can test the model and play with the data directly from your browser.
 
-👉 **[Click here to launch the PharmaNODE Live Demo](https://4be95ce8ca67ac0209.gradio.live)** 👈
+👉 **[Click here to launch the PharmaNODE Live Demo](https://de0fef301c326a0506.gradio.live)** 👈
 
 *(Note: No installation or coding required—just click the link and start experimenting!)*
 
