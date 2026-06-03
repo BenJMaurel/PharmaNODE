@@ -104,7 +104,18 @@ class DrugStudyConfig:
 
 
 def default_patient_meta(config: DrugStudyConfig) -> Dict[str, float]:
-    return {"WT": random.uniform(*config.wt_range)}
+    meta = {}
+    ranges = getattr(config, "covariate_ranges", {})
+    for col in config.covariate_columns:
+        if col in ranges:
+            meta[col] = random.uniform(*ranges[col])
+        elif col == "WT":
+            meta[col] = random.uniform(*config.wt_range)
+        elif col == "HT":
+            meta[col] = random.uniform(1.4, 2.0)
+        else:
+            meta[col] = 1.0
+    return meta
 
 
 def build_static_vector(
@@ -115,130 +126,89 @@ def build_static_vector(
 ) -> List[float]:
     dose_norm = dose_mg / dose_max if dose_max > 0 else 0.0
     static = [dose_norm]
+    ranges = getattr(config, "covariate_ranges", {})
     for col in config.covariate_columns:
-        if col == "WT":
-            static.append(float(patient_row.get("WT", 70.0)) / 70.0)
+        val = float(patient_row.get(col, 1.0))
+        # Use midpoint of range for rough normalization if provided
+        if col in ranges:
+            mid = sum(ranges[col]) / 2.0
+            static.append(val / (mid if mid > 0 else 1.0))
+        elif col == "WT":
+            static.append(val / 70.0)
         elif col == "HT":
-            static.append(float(patient_row.get("HT", 35.0)) / 35.0)
+            static.append(val / 35.0)
         else:
-            static.append(float(patient_row.get(col, 1.0)))
+            static.append(val)
     return static
 
 
-def generate_virtual_cohort(
-    pk_model_factory: Callable[[Dict[str, float]], Any],
-    config: DrugStudyConfig,
-    num_patients: int = 100,
-    patient_meta_fn: Optional[Callable[[DrugStudyConfig], Dict[str, float]]] = None,
-) -> pd.DataFrame:
+def generate_virtual_cohort(config: DrugStudyConfig, pk_model, n_patients: int = 100) -> pd.DataFrame:
     """
-    Generate long-format CSV-compatible cohort data from a PK model factory.
-
-    pk_model_factory(meta) must return an object with:
-      dose_mg, _sample_individual_parameters(), simulate(dosing_times, time_points)
+    Batched generation of the virtual cohort. 
+    Expects pk_model to support .simulate() returning (T, N) tensors.
     """
-    meta_fn = patient_meta_fn or default_patient_meta
     obs_abs = torch.tensor(config.observation_times_absolute(), dtype=torch.float32)
     sim_times = obs_abs[obs_abs > 0]
-    start_time = 0.0
-    end_time = sim_times.max().item()
-    fine = torch.arange(start_time, end_time + 0.1, 0.1)
+    fine = torch.arange(0.0, sim_times.max().item() + 0.1, 0.1)
     all_sim_times = torch.unique(torch.cat([sim_times, fine]))
 
     dosing_times = config.dosing_times_absolute()
     anchor = config.n_steady_state_cycles * config.dosing_interval_h
+
+    # Simulate batch
+    true_all = pk_model.simulate(dosing_times, all_sim_times) * config.unit_scale # shape (T, N)
+    
+    mask = torch.isin(all_sim_times, sim_times)
+    true_conc = true_all[mask, :] # shape (obs_T, N)
+    
+    tc_np = true_conc.cpu().numpy()
+    tc_all_np = true_all.cpu().numpy()
+    all_times_np = all_sim_times.cpu().numpy()
+    sim_times_np = sim_times.cpu().numpy()
+
     auc_t0, auc_t1 = config.auc_window
     auc_start = anchor + auc_t0
     auc_end = anchor + auc_t1
+    time_mask = (all_times_np >= auc_start) & (all_times_np <= auc_end)
+    import scipy.integrate
+    auc_np = scipy.integrate.trapezoid(tc_all_np[time_mask, :], all_times_np[time_mask] - anchor, axis=0)
 
-    all_rows: List[Dict[str, Any]] = []
-    generated = 0
-    patient_id = 0
+    sd_error = config.residual_add_sd + config.residual_prop_sd * tc_np
+    obs_np = np.clip(tc_np + sd_error * np.random.randn(*tc_np.shape), 0.0, None)
+    
+    for m in range(len(sim_times_np)):
+        for n in range(n_patients):
+            if obs_np[m, n] == 0:
+                obs_np[m, n] = tc_np[m, n]
 
-    print(f"Generating data for {num_patients} virtual patients...")
+    wt_np = pk_model.cov_wt.cpu().numpy() if hasattr(pk_model, "cov_wt") else np.full(n_patients, 70.0)
+    dose_np = pk_model.dose_mg.cpu().numpy()
 
-    while generated < num_patients:
-        meta = meta_fn(config)
-        pk_model = pk_model_factory(meta)
-        if not hasattr(pk_model, "dose_mg"):
-            pk_model.dose_mg = random.choice(config.dose_choices)
+    # Generate metadata for all patients
+    patient_metas = [default_patient_meta(config) for _ in range(n_patients)]
 
-        pk_model._sample_individual_parameters()
-        true_all = pk_model.simulate(dosing_times, all_sim_times) * config.unit_scale
-        true_all = true_all.flatten()
-
-        mask = torch.isin(all_sim_times, sim_times)
-        true_conc = true_all[mask]
-        sim_t_list = all_sim_times[mask].tolist()
-
-        prop_sd = config.residual_prop_sd
-        add_sd = config.residual_add_sd
-        sd_error = add_sd + prop_sd * true_conc
-        noise = torch.randn_like(true_conc)
-        concentrations = true_conc + sd_error * noise
-        concentrations = torch.clamp(concentrations, min=1e-6)
-
-        auc_mask = (all_sim_times >= auc_start) & (all_sim_times <= auc_end)
-        auc_times = (all_sim_times[auc_mask] - anchor).cpu().numpy()
-        auc_conc = true_all[auc_mask].cpu().numpy()
-        if len(auc_times) < 2:
-            continue
-        auc = float(auc_linuplogdown(auc_conc, auc_times))
-
-        generated += 1
-        patient_id = generated
-        dose_mg = float(pk_model.dose_mg)
-
+    all_rows = []
+    for n in range(n_patients):
+        pid = n + 1
         base = {
-            "ID": patient_id,
-            "PERI": 1,
-            "AUC": auc,
-            "mdv": 1,
-            "ss": 1,
-            "ST": 0,
-            "nbr_ss": config.n_steady_state_cycles,
+            "ID": pid, "PERI": 1, "AUC": auc_np[n], "mdv": 1, "ss": 1, "ST": 0, "nbr_ss": config.n_steady_state_cycles
         }
         for col in config.covariate_columns:
-            base[col] = meta[col]
+            if col == "WT":
+                base["WT"] = patient_metas[n].get("WT", 70.0)
+            else:
+                base[col] = patient_metas[n].get(col, 1.0)
 
-        all_rows.append(
-            {
-                **base,
-                "TIME": 0.0,
-                "DV": ".",
-                "AMT": dose_mg,
-                "II": config.dosing_interval_h,
-            }
-        )
-
+        all_rows.append({**base, "TIME": 0.0, "DV": ".", "AMT": dose_np[n], "II": config.dosing_interval_h})
         for cycle in range(config.n_steady_state_cycles):
             t_dose = -config.dosing_interval_h * (config.n_steady_state_cycles - cycle)
-            all_rows.append(
-                {
-                    **base,
-                    "TIME": t_dose,
-                    "DV": ".",
-                    "AMT": dose_mg,
-                    "II": config.dosing_interval_h,
-                }
-            )
+            all_rows.append({**base, "TIME": t_dose, "DV": ".", "AMT": dose_np[n], "II": config.dosing_interval_h})
 
-        for t_obs, conc in zip(sim_t_list, concentrations.tolist()):
-            c = float(conc)
-            all_rows.append(
-                {
-                    **base,
-                    "TIME": t_obs - anchor,
-                    "DV": c,
-                    "AMT": ".",
-                    "II": ".",
-                    "mdv": 0,
-                    "ss": ".",
-                }
-            )
+        for m, t_obs in enumerate(sim_times_np):
+            all_rows.append({**base, "TIME": t_obs - anchor, "DV": obs_np[m, n], "AMT": ".", "II": ".", "mdv": 0, "ss": "."})
 
-    print("Generation complete.")
-    return pd.DataFrame(all_rows)
+    df = pd.DataFrame(all_rows)
+    return df.sort_values(by=['ID', 'TIME']).reset_index(drop=True)
 
 
 

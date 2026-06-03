@@ -198,17 +198,31 @@ def extract_gen_tac(file_path=["virtual_cohort_train.csv", "virtual_cohort_test.
                     pass
             # ------------------------------------------------
             
-            if (patient_df['CYP'] == 1).all():
-                classe = 1 # 0: Rein, 1: Card, 2: Poumons classe = organ
-            else: 
-                classe = 0
-                
-            if float(patient_df['II'].values[0]) == 24:
-                traitement = 0 # 0: ADV
-            else:
-                traitement = 1 # 1: PRO
-                
-            static = [doses, traitement, classe]
+            # --- Dynamic Covariate Extraction ---
+            config_path = f"./results/{exp}/drug_config.json"
+            covariate_cols = ["II", "CYP"]
+            if exp and os.path.exists(config_path):
+                import json
+                try:
+                    with open(config_path, "r") as f:
+                        config_data = json.load(f)
+                        if "covariate_columns" in config_data:
+                            covariate_cols = config_data["covariate_columns"]
+                except:
+                    pass
+            
+            static = [doses]
+            for col in covariate_cols:
+                if col in patient_df.columns:
+                    val = float(patient_df[col].values[0])
+                    # Standard mapping for legacy columns to avoid breaking old models
+                    if col == 'CYP':
+                        val = 1.0 if (patient_df['CYP'] == 1).all() else 0.0
+                    elif col == 'II':
+                        val = 0.0 if val == 24.0 else 1.0
+                    static.append(val)
+                else:
+                    static.append(0.0)
             
             data_dict[patient_id] = {
                 'times_val': torch.tensor(y_times),
@@ -276,9 +290,31 @@ def extract_gen_tac_film(file_path=["virtual_cohort_film_train.csv", "virtual_co
                 x_values.append(float(visit_df_clean.loc[idx, 'OUT']))
             
             dose = visit_df[visit_df['DOSE'].notna()]['DOSE'].astype(float).tolist()[0]
-            classe = 1 if (visit_df['CYP'] == 1).all() else 0
-            traitement = 0 if float(visit_df['II'].values[0]) == 24 else 1
-            static = [dose, traitement, classe]
+            
+            # --- Dynamic Covariate Extraction ---
+            config_path = f"./results/{exp}/drug_config.json"
+            covariate_cols = ["II", "CYP"]
+            if exp and os.path.exists(config_path):
+                import json
+                try:
+                    with open(config_path, "r") as f:
+                        config_data = json.load(f)
+                        if "covariate_columns" in config_data:
+                            covariate_cols = config_data["covariate_columns"]
+                except:
+                    pass
+            
+            static = [dose]
+            for col in covariate_cols:
+                if col in visit_df.columns:
+                    val = float(visit_df[col].values[0])
+                    if col == 'CYP':
+                        val = 1.0 if (visit_df['CYP'] == 1).all() else 0.0
+                    elif col == 'II':
+                        val = 0.0 if val == 24.0 else 1.0
+                    static.append(val)
+                else:
+                    static.append(0.0)
 
             data_dict[patient_id][f'v{visit}'] = {
                 'times_val': torch.tensor(y_times),

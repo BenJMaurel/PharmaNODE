@@ -58,15 +58,22 @@ def parse_datasets(args, device):
 				base = drug_config.results_path
 				train_fp = os.path.join(base, "virtual_cohort_train.csv")
 				test_fp = os.path.join(base, "virtual_cohort_test.csv")
-				data_dict_train, max_out_train = extract_gen_pk(
-					drug_config, file_path=[train_fp], plot=False
+				data_dict, max_out_value = extract_gen_pk(
+					drug_config, file_path=[train_fp, test_fp], plot=False
 				)
-				data_dict_test, max_out_test = extract_gen_pk(
-					drug_config, file_path=[test_fp], plot=False
-				)
-				max_out_value = max_out_train
-				train_keys = list(data_dict_train.keys())
-				test_keys = list(data_dict_test.keys())
+				
+				train_df = pd.read_csv(train_fp)
+				test_df = pd.read_csv(test_fp)
+				
+				train_ids = list(train_df['ID'].astype(str).unique())
+				test_ids = list(test_df['ID'].astype(str).unique())
+				
+				train_keys = [k for k in train_ids if k in data_dict]
+				test_keys = [k for k in test_ids if k in data_dict]
+				
+				data_dict_train = {k: data_dict[k] for k in train_keys}
+				data_dict_test = {k: data_dict[k] for k in test_keys}
+				
 				dataset_train = PKDataset(data_dict_train)
 				dataset_test = PKDataset(data_dict_test)
 				collate_train = lambda batch: collate_fn_pk(
@@ -96,21 +103,27 @@ def parse_datasets(args, device):
 						dict_list_train.append(data_dict)
 
 				if datasets_to_load_train == ['gen_tac']:
-					train_keys, test_keys = utils.virtual_train_test_list_dict(
-						dict_list_train, train_fraq=0.8
-					)
+					test_fp = f"./results/{args.experiment}/virtual_cohort_test.csv" if args.experiment else "virtual_cohort_test.csv"
+					if args.load:
+						test_fp = f"./results/{args.load}/virtual_cohort_test.csv"
+					if os.path.exists(test_fp):
+						test_df = pd.read_csv(test_fp)
+						if 'ID_new' in test_df.columns:
+							test_keys = list(test_df['ID_new'].astype(str).unique())
+						else:
+							test_keys = list(test_df['ID'].astype(str).unique())
+						
+						# Ensure they exist in dataset_obj
+						test_keys = [k for k in test_keys if k in dataset_obj]
+						train_keys = [k for k in dataset_obj.keys() if k not in test_keys]
+					else:
+						train_keys, test_keys = utils.virtual_train_test_list_dict(
+							dict_list_train, train_fraq=0.8
+						)
 				else:
 					train_keys, test_keys = utils.split_train_test_list_dict(
 						dict_list_train, train_fraq=0.8
 					)
-				if test == 1:
-					_, test_keys_2 = utils.split_train_test_list_dict(
-						dict_list, train_fraq=0.0, shuffle=False
-					)
-					try:
-						test_keys.extend(test_keys_2)
-					except Exception:
-						test_keys = test_keys_2
 
 				dataset_train = TacroDataset({k: dataset_obj[k] for k in train_keys})
 				dataset_test = TacroDataset({k: dataset_obj[k] for k in test_keys})
@@ -139,7 +152,7 @@ def parse_datasets(args, device):
 		)
 		test_dataloader = DataLoader(
 			dataset_test,
-			batch_size=args.n,
+			batch_size=len(dataset_test),
 			shuffle=False,
 			collate_fn=collate_test,
 		)

@@ -95,7 +95,6 @@ class LatentODE(VAE_Baseline):
 				except:
 					dose_expanded = dose.view(-1, 1, 1).expand(-1, truth.shape[1], 1)
 					truth_w_mask = torch.cat((truth, dose_expanded), -1)  
-				# static = torch.cat((dose, static), -1)
 			first_point_mu, first_point_std = self.encoder_z0(
 				truth_w_mask, truth_time_steps, static = static, run_backwards = run_backwards)
 			means_z0 = first_point_mu.repeat(n_traj_samples, 1, 1)

@@ -2,28 +2,54 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint_adjoint, odeint
 import numpy as np
+import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import argparse
+import seaborn as sns
 import os
 
+# ==============================================================================
+# Parameters from the paper
+# ==============================================================================
+
 POPULATION_PARAMS = {
-    'theta3_CL': 21.2, 'theta1_Ktr': 3.34, 'theta2_Ktr_study': 1.53,
-    'theta4_CL_HT': -3.14, 'theta5_CL_CYP': 2.00, 'theta6_Vc' : 486,
-    'Q': 79.0, 'theta7_Vc_study': 0.29, 'Vp': 271.0,
-    'Vp2' : 292.0, 'Q2' : 75.0, 'theta_Km': 0.01, 'theta_Vmax': 21.2 * 0.01
+    'theta3_CL': 21.2,          
+    'theta1_Ktr': 3.34,         
+    'theta2_Ktr_study': 1.53,   
+    'theta4_CL_HT': -3.14,      
+    'theta5_CL_CYP': 2.00,      
+    'theta6_Vc' : 486,
+    'Q': 79.0,                  
+    'theta7_Vc_study': 0.29,    
+    'Vp': 271.0,                
+    'Vp2' : 292.0,
+    'Q2' : 75.0,
+    'theta_Km': 0.01,           
+    'theta_Vmax': 21.2 * 0.01 
 }
 
 IPV_OMEGA = {
-    'CL':  np.sqrt(0.08), 'Vc':  np.sqrt(0.10), 'Q':   np.sqrt(0.29), 'Vp':  np.sqrt(0.36),
-    'Ktr': np.sqrt(0.06), 'Vp2': np.sqrt(0.36), 'Q2': np.sqrt(0.29),
-    'Vmax': np.sqrt(0.08), 'Km': np.sqrt(0.10)
+    'CL':  np.sqrt(0.08), 
+    'Vc':  np.sqrt(0.10), 
+    'Q':   np.sqrt(0.29), 
+    'Vp':  np.sqrt(0.36), 
+    'Ktr': np.sqrt(0.06), 
+    'Vp2': np.sqrt(0.36),
+    'Q2': np.sqrt(0.29),
+    'Vmax': np.sqrt(0.08), 
+    'Km': np.sqrt(0.10)    
 }
 
-RESIDUAL_ERROR_PROP_SD = 0.113
-RESIDUAL_ERROR_ADD_SD = 0.71
+RESIDUAL_ERROR_PROP_SD = 0.113  
+RESIDUAL_ERROR_ADD_SD = 0.71  
 
 class BatchedTacrolimusPK(nn.Module):
+    """
+    Optimized Batched PK Model.
+    Simulates N patients simultaneously. Uses matrix exponential for linear scenarios 
+    and batched ODEs for non-linear scenarios.
+    """
     def __init__(self, is_prograf, hematocrit, is_expresser, dose_mg, scenario=1, device=torch.device("cpu"), adjoint=False):
         super().__init__()
         
@@ -41,6 +67,7 @@ class BatchedTacrolimusPK(nn.Module):
         self.individual_params = self._sample_individual_parameters()
 
     def _sample_individual_parameters(self):
+        # Calculate Typical Values (TV) batched
         study_factor = self.is_prograf
         cyp_factor = self.is_expresser
 
@@ -57,6 +84,7 @@ class BatchedTacrolimusPK(nn.Module):
                     ((self.hematocrit / 35.0) ** self.pop_params['theta4_CL_HT']) * \
                     (self.pop_params['theta5_CL_CYP'] ** cyp_factor)
             tv_km = torch.full((self.N,), self.pop_params['theta_Km'], device=self.device)
+            
             params.update({
                 'Vp2': torch.full((self.N,), self.pop_params['Vp2'], device=self.device), 
                 'Q2': torch.full((self.N,), self.pop_params['Q2'], device=self.device),
@@ -64,6 +92,7 @@ class BatchedTacrolimusPK(nn.Module):
                 'Km': tv_km
             })
 
+        # Apply batched IPV (Log-Normal)
         ind_params = {}
         for p_name, tv_p in params.items():
             eta = torch.randn(self.N, device=self.device) * self.ipv.get(p_name, 0.0)
@@ -71,11 +100,13 @@ class BatchedTacrolimusPK(nn.Module):
             
         return ind_params
 
+    # --- ODE Implementation (Scenario 3) ---
     def forward(self, t, state):
         A_depot, A_gut1, A_gut2, A_gut3, A_central, A_peripheral = state
 
         Ktr, CL_F, Q_F = self.individual_params['Ktr'], self.individual_params['CL'], self.individual_params['Q']
         Vc_F, Vp_F = self.individual_params['Vc'], self.individual_params['Vp']
+
         k_12 = Q_F / Vc_F  
         k_21 = Q_F / Vp_F  
 
@@ -98,7 +129,9 @@ class BatchedTacrolimusPK(nn.Module):
         return dA_depot_dt, dA_gut1_dt, dA_gut2_dt, dA_gut3_dt, dA_central_dt, dA_peripheral_dt
     
     def simulate_ode(self, dosing_times, time_points):
+        # State: 6 tensors of shape (N,)
         state = tuple([torch.zeros(self.N, device=self.device) for _ in range(6)])
+        
         all_concentrations = [torch.zeros(self.N, device=self.device).unsqueeze(0)]
         dosing_times = sorted(dosing_times)
         last_time = torch.tensor([0.0], device=self.device)
@@ -112,7 +145,7 @@ class BatchedTacrolimusPK(nn.Module):
                 if len(ts_interval) > 0:
                     tt = torch.cat([last_time, ts_interval])
                     solution = self.odeint(self, state, tt, atol=1e-6, rtol=1e-6)
-                    concentrations = solution[4][1:] / self.individual_params['Vc']
+                    concentrations = solution[4][1:] / self.individual_params['Vc'] # shape: (len(ts_interval), N)
                     all_concentrations.append(concentrations)
                     state = tuple(s[-1] for s in solution)
                     
@@ -127,15 +160,19 @@ class BatchedTacrolimusPK(nn.Module):
             concentrations = solution[4][1:] / self.individual_params['Vc']
             all_concentrations.append(concentrations)
             
-        return torch.cat(all_concentrations, dim=0) 
+        return torch.cat(all_concentrations, dim=0) # Shape: (M, N)
 
+    # --- Analytical Implementation (Scenarios 1 & 2) ---
     def _build_system_matrix(self):
+        # Builds the transition matrix A of shape (N, 6, 6)
         A = torch.zeros(self.N, 6, 6, device=self.device)
         Ktr, CL_F, Q_F = self.individual_params['Ktr'], self.individual_params['CL'], self.individual_params['Q']
         Vc_F, Vp_F = self.individual_params['Vc'], self.individual_params['Vp']
+
         k_elim = CL_F / Vc_F
         k_12 = Q_F / Vc_F
         k_21 = Q_F / Vp_F
+
         A[:, 0, 0] = -Ktr; A[:, 1, 0] = Ktr; A[:, 1, 1] = -Ktr
         A[:, 2, 1] = Ktr; A[:, 2, 2] = -Ktr; A[:, 3, 2] = Ktr
         A[:, 3, 3] = -Ktr; A[:, 4, 3] = Ktr
@@ -147,10 +184,13 @@ class BatchedTacrolimusPK(nn.Module):
         A = self._build_system_matrix()
         state = torch.zeros(self.N, 6, 1, device=self.device)
         all_concentrations = [torch.zeros(self.N, device=self.device).unsqueeze(0)]
+        
         dosing_times = sorted(dosing_times)
         last_time = 0.0
+        
         if 0.0 in dosing_times:
             state[:, 0, 0] += self.dose_mg
+            
         for event_t in dosing_times:
             if event_t > last_time:
                 ts_interval = time_points[(time_points > last_time) & (time_points <= event_t)]
@@ -161,8 +201,10 @@ class BatchedTacrolimusPK(nn.Module):
                     conc = state[:, 4, 0] / self.individual_params['Vc']
                     all_concentrations.append(conc.unsqueeze(0))
                     last_time = t.item()
+                    
             if event_t > 0.0:
                  state[:, 0, 0] += self.dose_mg
+                 
         ts_final = time_points[time_points > last_time]
         for t in ts_final:
             dt = t - last_time
@@ -171,6 +213,7 @@ class BatchedTacrolimusPK(nn.Module):
             conc = state[:, 4, 0] / self.individual_params['Vc']
             all_concentrations.append(conc.unsqueeze(0))
             last_time = t.item()
+
         return torch.cat(all_concentrations, dim=0) 
 
     def simulate(self, dosing_times, time_points):
@@ -179,7 +222,27 @@ class BatchedTacrolimusPK(nn.Module):
         else:
             return self.simulate_ode(dosing_times, time_points)
 
-def generate_patient_visits_batched(model, formulation_str, start_id, scenario, nbr_ss, observation_times, device):
+# ==============================================================================
+# Helper logic to assemble the dataframe rapidly
+# ==============================================================================
+def process_cohort_batch(formulation_str, is_prograf_val, num_patients, start_id, scenario, nbr_ss, observation_times, device):
+    if num_patients == 0:
+        return []
+        
+    is_prograf_tensor = torch.full((num_patients,), is_prograf_val, device=device)
+    is_expresser_tensor = torch.randint(0, 2, (num_patients,), device=device).float()
+    
+    if scenario != 2:
+        hematocrit_tensor = torch.full((num_patients,), 35.0, device=device)
+    else:
+        hematocrit_tensor = torch.empty(num_patients, device=device).uniform_(25.0, 45.0)
+
+    dose_choices = torch.tensor([2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0], device=device)
+    dose_idx = torch.randint(0, len(dose_choices), (num_patients,), device=device)
+    dose_mg = dose_choices[dose_idx]
+
+    model = BatchedTacrolimusPK(is_prograf_tensor, hematocrit_tensor, is_expresser_tensor, dose_mg, scenario=scenario, device=device)
+
     sim_times = observation_times[observation_times > 0]
     fine_grained_times = torch.arange(0.0, sim_times.max().item(), 0.1, device=device)
     all_sim_times = torch.unique(torch.cat([sim_times, fine_grained_times]))
@@ -188,33 +251,26 @@ def generate_patient_visits_batched(model, formulation_str, start_id, scenario, 
     ST = 1 if formulation_str == 'Prograf' else 0
     dosing_times = [24*nbr_ss - 12*(nbr_ss - i) for i in range(nbr_ss+1)] if formulation_str == 'Prograf' else [i*24 for i in range(nbr_ss+1)]
 
-    # Simulate Visit 1
-    true_conc_all_v1 = model.simulate(dosing_times=dosing_times, time_points=all_sim_times) * 1000
-    
-    # Randomly change doses for Visit 2
-    dose_choices = torch.tensor([2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0], device=device)
-    dose_idx_v2 = torch.randint(0, len(dose_choices), (model.N,), device=device)
-    
-    # Ensure dose 2 is different from dose 1
-    while True:
-        same_mask = dose_choices[dose_idx_v2] == model.dose_mg
-        if not same_mask.any():
-            break
-        dose_idx_v2[same_mask] = torch.randint(0, len(dose_choices), (same_mask.sum().item(),), device=device)
-        
-    model.dose_mg = dose_choices[dose_idx_v2]
-    
-    # Simulate Visit 2
-    true_conc_all_v2 = model.simulate(dosing_times=dosing_times, time_points=all_sim_times) * 1000
-
+    # Simulate Batched
+    true_concentrations_all = model.simulate(dosing_times=dosing_times, time_points=all_sim_times) * 1000
     mask = torch.isin(all_sim_times, sim_times)
-    tc_np_v1 = true_conc_all_v1[mask, :].cpu().numpy()
-    tc_np_v2 = true_conc_all_v2[mask, :].cpu().numpy()
-    tc_all_np_v1 = true_conc_all_v1.cpu().numpy()
-    tc_all_np_v2 = true_conc_all_v2.cpu().numpy()
+    true_concentrations = true_concentrations_all[mask, :] # Shape: (Num_Obs, N)
+
+    # Convert parameters to CPU numpy for fast DataFrame assembly
+    tc_np = true_concentrations.cpu().numpy()
+    tc_all_np = true_concentrations_all.cpu().numpy()
     all_times_np = all_sim_times.cpu().numpy()
+    
+    dose_np = dose_mg.cpu().numpy()
+    cyp_np = is_expresser_tensor.cpu().numpy()
+    ht_np = hematocrit_tensor.cpu().numpy()
+    k_elim_np = (model.individual_params['CL'] / model.individual_params['Vc']).cpu().numpy()
+    k_12_np = (model.individual_params['Q'] / model.individual_params['Vc']).cpu().numpy()
+    k_21_np = (model.individual_params['Q'] / model.individual_params['Vp']).cpu().numpy()
+    
     sim_times_np = sim_times.cpu().numpy()
 
+    # Calculate AUC across entire batch
     if formulation_str == 'Prograf':
         time_mask = (all_times_np >= nbr_ss*24) & (all_times_np <= (nbr_ss+1)*24 - 12)
         base_time = (nbr_ss+1)*24.0
@@ -222,107 +278,86 @@ def generate_patient_visits_batched(model, formulation_str, start_id, scenario, 
         time_mask = all_times_np >= nbr_ss*24
         base_time = nbr_ss*24.0
         
-    import scipy.integrate
-    auc_np_v1 = scipy.integrate.trapezoid(tc_all_np_v1[time_mask, :], all_times_np[time_mask] - base_time, axis=0)
-    auc_np_v2 = scipy.integrate.trapezoid(tc_all_np_v2[time_mask, :], all_times_np[time_mask] - base_time, axis=0)
+    auc_np = np.trapz(tc_all_np[time_mask, :], all_times_np[time_mask] - base_time, axis=0)
 
-    sd_error_v1 = RESIDUAL_ERROR_ADD_SD + RESIDUAL_ERROR_PROP_SD * tc_np_v1
-    obs_np_v1 = np.clip(tc_np_v1 + sd_error_v1 * np.random.randn(*tc_np_v1.shape), 0.0, None)
-    
-    sd_error_v2 = RESIDUAL_ERROR_ADD_SD + RESIDUAL_ERROR_PROP_SD * tc_np_v2
-    obs_np_v2 = np.clip(tc_np_v2 + sd_error_v2 * np.random.randn(*tc_np_v2.shape), 0.0, None)
+    # Add Noise
+    noise = np.random.randn(*tc_np.shape)
+    sd_error = RESIDUAL_ERROR_ADD_SD + RESIDUAL_ERROR_PROP_SD * tc_np
+    obs_np = np.clip(tc_np + sd_error * noise, a_min=0.0, a_max=None)
 
+    # Reconstruct zero time points
     for m in range(len(sim_times_np)):
-        if obs_np_v1[m, 0] == 0: obs_np_v1[m, :] = tc_np_v1[m, :]
-        if obs_np_v2[m, 0] == 0: obs_np_v2[m, :] = tc_np_v2[m, :]
-
-    cyp_np = model.is_expresser.cpu().numpy()
-    ht_np = model.hematocrit.cpu().numpy()
-    k_elim_np = (model.individual_params['CL'] / model.individual_params['Vc']).cpu().numpy()
-    k_12_np = (model.individual_params['Q'] / model.individual_params['Vc']).cpu().numpy()
-    k_21_np = (model.individual_params['Q'] / model.individual_params['Vp']).cpu().numpy()
+        if obs_np[m, 0] == 0:
+            obs_np[m, :] = tc_np[m, :]
 
     all_rows = []
     
-    # Process Visit 1 and Visit 2 data
-    for v_idx, (obs_np, auc_np, dose_np) in enumerate([(obs_np_v1, auc_np_v1, model.dose_mg.cpu().numpy()), 
-                                                       (obs_np_v2, auc_np_v2, dose_choices[dose_idx_v2].cpu().numpy())]):
-        visit_id = v_idx + 1
-        for n in range(model.N):
-            pid = start_id + n
-            common = {
-                'ID': pid, 'VISIT': visit_id, 'PERI': 1, 'CYP': int(cyp_np[n]), 'II': ii, 'DRUG': formulation_str,
-                'nbr_ss': nbr_ss, 'AUC': auc_np[n], 'ST': ST, 'HT': ht_np[n],
-                'K_ELIM': k_elim_np[n], 'K_12': k_12_np[n], 'K_21': k_21_np[n]
-            }
+    # Assembly is fast as tensors are converted to native types
+    for n in range(num_patients):
+        pid = start_id + n
+        CYP = int(cyp_np[n])
+        auc = auc_np[n]
+        ht = ht_np[n]
+        k_e, k_12, k_21 = k_elim_np[n], k_12_np[n], k_21_np[n]
+        
+        common_data = {'ID': pid, 'PERI': 1, 'CYP': CYP, 'II': ii, 'DRUG': formulation_str, 'AUC': auc, 'ST': ST, 'HT': ht, 'K_ELIM': k_e, 'K_12': k_12, 'K_21': k_21}
 
-            all_rows.append({**common, 'TIME': 0.0, 'DV': '.', 'AMT': dose_np[n], 'mdv': 1, 'ss': 1})
-            for i in range(nbr_ss):
-                all_rows.append({**common, 'TIME': -ii*(i+1), 'DV': '.', 'AMT': dose_np[n], 'mdv': 1, 'ss': 1})
-            for m, t in enumerate(sim_times_np):
-                all_rows.append({**common, 'TIME': t - nbr_ss*24, 'DV': obs_np[m, n], 'AMT': '.', 'II': '.', 'mdv': 0, 'ss': '.'})
+        all_rows.append({**common_data, 'TIME': 0.0, 'DV': '.', 'AMT': dose_np[n], 'nbr_ss': nbr_ss, 'mdv': 1, 'ss': 1})
+        for i in range(nbr_ss):
+            all_rows.append({**common_data, 'TIME': -ii*(i+1), 'DV': '.', 'AMT': dose_np[n], 'mdv': 1, 'ss': 1})
+        for m, t in enumerate(sim_times_np):
+            all_rows.append({**common_data, 'TIME': t - nbr_ss*24, 'DV': obs_np[m, n], 'AMT': '.', 'II': '.', 'nbr_ss': nbr_ss, 'mdv': 0, 'ss': '.'})
 
     return all_rows
 
-def generate_virtual_cohort_film(num_patients=10, scenario=1):
+def generate_virtual_cohort(num_patients=10, scenario=1):
     nbr_ss = 6
     observation_times = torch.tensor([0, 0.33, 0.67, 1., 1.5, 2., 3., 4., 6., 9., 12., 24.]) + 24 * nbr_ss
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    print(f"Generating data for {num_patients} virtual patients (2 visits each) (Batched on {device})...")
+    print(f"Generating data for {num_patients} virtual patients (Batched on {device})...")
     
+    # Split patients roughly 50/50 for Prograf and Advagraf to allow batching
     num_prograf = num_patients // 2
     num_advagraf = num_patients - num_prograf
-
-    rows = []
     
-    # Process Prograf
-    if num_prograf > 0:
-        is_prograf_tensor = torch.ones(num_prograf, device=device)
-        is_expresser_tensor = torch.randint(0, 2, (num_prograf,), device=device).float()
-        hematocrit_tensor = torch.full((num_prograf,), 35.0, device=device) if scenario != 2 else torch.empty(num_prograf, device=device).uniform_(25.0, 45.0)
-        dose_choices = torch.tensor([2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0], device=device)
-        dose_idx = torch.randint(0, len(dose_choices), (num_prograf,), device=device)
-        
-        model_prograf = BatchedTacrolimusPK(is_prograf_tensor, hematocrit_tensor, is_expresser_tensor, dose_choices[dose_idx], scenario=scenario, device=device)
-        rows += generate_patient_visits_batched(model_prograf, 'Prograf', 1, scenario, nbr_ss, observation_times, device)
-
-    # Process Advagraf
-    if num_advagraf > 0:
-        is_prograf_tensor = torch.zeros(num_advagraf, device=device)
-        is_expresser_tensor = torch.randint(0, 2, (num_advagraf,), device=device).float()
-        hematocrit_tensor = torch.full((num_advagraf,), 35.0, device=device) if scenario != 2 else torch.empty(num_advagraf, device=device).uniform_(25.0, 45.0)
-        dose_choices = torch.tensor([2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0], device=device)
-        dose_idx = torch.randint(0, len(dose_choices), (num_advagraf,), device=device)
-
-        model_advagraf = BatchedTacrolimusPK(is_prograf_tensor, hematocrit_tensor, is_expresser_tensor, dose_choices[dose_idx], scenario=scenario, device=device)
-        rows += generate_patient_visits_batched(model_advagraf, 'Advagraf', 1 + num_prograf, scenario, nbr_ss, observation_times, device)
+    rows_prograf = process_cohort_batch('Prograf', 1.0, num_prograf, 1, scenario, nbr_ss, observation_times, device)
+    rows_advagraf = process_cohort_batch('Advagraf', 0.0, num_advagraf, num_prograf + 1, scenario, nbr_ss, observation_times, device)
 
     print("Generation complete.")
-    COLUMNS = ['ID', 'VISIT', 'TIME', 'DV', 'AMT', 'PERI', 'CYP', 'II', 'DRUG', 'nbr_ss', 'AUC', 'mdv', 'ss', 'ST', 'HT', 'K_ELIM', 'K_12', 'K_21']
-    df = pd.DataFrame(rows)
-    return df[COLUMNS].sort_values(by=['ID', 'VISIT', 'TIME']).reset_index(drop=True)
+    return pd.DataFrame(rows_prograf + rows_advagraf).sort_values(by=['ID', 'TIME']).reset_index(drop=True)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Generation Tacro FiLM')
-    parser.add_argument('--exp', type=str, default='exp_film_run/', help="Path for save experiment")
-    parser.add_argument('--num_patients', type=int, default=1000, help="Number of virtual patients to generate")
-    parser.add_argument('--scenario', type=int, default=1, help="Type of scenario you want (cf paper)")
+    parser = argparse.ArgumentParser('Generation Tacro')
+    parser.add_argument('--exp', type=str, default='./results/', help="Path for save experiment")
+    parser.add_argument('--num_patients', type=int, default=300, help="Number of virtual patients to generate")
+    parser.add_argument('--first_at', type=int, default=1, help="Do you want to generate test set also?")
+    parser.add_argument('--scenario', type=int, default=3, help="Type of scenario you want (cf paper)")
     args = parser.parse_args()
     
-    os.makedirs(f'./results/exp_film_run/{args.exp}', exist_ok=True)
-    cohort_df = generate_virtual_cohort_film(num_patients=args.num_patients, scenario=args.scenario)
+    NUM_VIRTUAL_PATIENTS = args.num_patients
+    cohort_df = generate_virtual_cohort(num_patients=NUM_VIRTUAL_PATIENTS, scenario=args.scenario)
     
     unique_ids = cohort_df['ID'].unique()
-    train_ids, test_ids = train_test_split(unique_ids, test_size=0.2, shuffle=False)
+
+    if args.first_at == 1:
+        train_ids, test_ids = train_test_split(unique_ids, test_size=0.2, shuffle=False)
+    elif args.first_at == 2:
+        _, test_ids = train_test_split(unique_ids, test_size=0.8, shuffle=False)
+    else:
+        train_ids = unique_ids
+
+    os.makedirs(f'./results/{args.exp}', exist_ok=True)
     
-    train_df = cohort_df[cohort_df['ID'].isin(train_ids)]
-    test_df = cohort_df[cohort_df['ID'].isin(test_ids)]
-    
-    train_df.to_csv('virtual_cohort_train.csv', index=False)
-    test_df.to_csv('virtual_cohort_test.csv', index=False)
-    
-    train_df.to_csv(f'./results/exp_film_run/{args.exp}/virtual_cohort_train.csv', index=False)
-    test_df.to_csv(f'./results/exp_film_run/{args.exp}/virtual_cohort_test.csv', index=False)
-    
-    print(f"\nSuccessfully created FiLM virtual cohort with {args.num_patients} patients.")
+    if args.first_at <= 1:
+        train_df = cohort_df[cohort_df['ID'].isin(train_ids)]
+        train_df.to_csv('virtual_cohort_train.csv', index=False)
+        train_df.to_csv(f'./results/{args.exp}/virtual_cohort_train.csv', index=False)
+    if args.first_at >= 1:
+        test_df = cohort_df[cohort_df['ID'].isin(test_ids)]
+        test_df.to_csv('virtual_cohort_test.csv', index=False)
+        test_df.to_csv(f'./results/{args.exp}/virtual_cohort_test.csv', index=False)
+        
+    print(f"\nSuccessfully created virtual cohort with {NUM_VIRTUAL_PATIENTS} patients.")
+    print("\n--- File Head ---")
+    print(cohort_df.head(15))

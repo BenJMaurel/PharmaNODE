@@ -1,3 +1,32 @@
+# 💊 PharmaNODE 
+
+👋 **Welcome PAGE Conference Attendees!** Thank you for stopping by our poster. 
+
+## 🚀 Live Interactive Demo
+
+Want to see PharmaNODE in action right now? We have set up a live interactive web app so you can test the model and play with the data directly from your browser.
+
+👉 **[Click here to launch the PharmaNODE Live Demo](https://4be95ce8ca67ac0209.gradio.live)** 👈
+
+*(Note: No installation or coding required—just click the link and start experimenting!)*
+
+---
+
+## 📖 About This Project
+
+Model-Informed Precision Dosing of drugs with a narrow therapeutic index (like tacrolimus) routinely relies on Empirical Bayes Estimation (EBE) based on population pharmacokinetic (PK) models. However, traditional non-linear mixed-effects (NLME) models rely on rigid, pre-specified compartmental equations. When a patient's PK deviates from these structures, standard estimators can produce biased AUC estimates.
+
+**PharmaNODE** introduces a data-driven alternative using **Latent Neural Ordinary Differential Equations (Latent ODEs)**. 
+
+### Key Highlights
+* **Continuous-Time & Non-Parametric:** Bypasses traditional compartmental equations. An ODE-RNN encoder processes sparse clinical observations to infer the patient's latent state, while a Neural ODE decoder learns drug disposition directly from the data.
+* **Highly Robust:** In simulation studies, PharmaNODE matched standard methods (MAP-BE) under ideal conditions, but showed significantly superior precision when faced with structural or covariate misspecification.
+* **Clinically Accurate:** In real-world cross-validation on renal transplant recipients, our Latent ODE yielded more precise predictions than the clinical standard IT2B (RMSPE 7.99% vs 9.24%) with lower bias.
+* **Data Efficient:** The model achieves comparable performance to NLME methods even with very limited datasets (as few as 25 patients).
+* **Unsupervised Discovery:** A Principal Component Analysis of the learned latent space successfully clustered patients by CYP3A5 genotype and formulation, offering a powerful tool for multi-modal covariate discovery.
+
+---
+
 # Improved Tacrolimus AUC Prediction Using Neural Ordinary Differential Equations
 
 This repository contains the official code for the paper "Improved Tacrolimus AUC Prediction Using Neural Ordinary Differential Equations" (2025). It provides a comprehensive framework for predicting Tacrolimus Area Under the Curve (AUC) by leveraging Neural Ordinary Differential Equations (NODEs).

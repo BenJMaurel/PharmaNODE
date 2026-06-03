@@ -128,8 +128,29 @@ if __name__ == '__main__':
     z0_prior = torch.distributions.Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
     obsrv_std = torch.Tensor([0.01]).to(device)
     
-    model = create_LatentODE_model(args, input_dim=1, z0_prior=z0_prior, obsrv_std=obsrv_std, device=device)
     ckpt_path = f"./results/exp_film_run/{args.load}/experiment_film_{args.load}_best.ckpt"
+    if not os.path.exists(ckpt_path):
+        ckpt_path = f"./results/exp_film_run/{args.load}/experiment_film_{args.load}.ckpt"
+    
+    checkpt = None
+    if os.path.exists(ckpt_path):
+        checkpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        ckpt_args = checkpt.get('args', None)
+        if ckpt_args is not None:
+            args.latents = getattr(ckpt_args, 'latents', args.latents)
+            args.rec_dims = getattr(ckpt_args, 'rec_dims', args.rec_dims)
+            args.rec_layers = getattr(ckpt_args, 'rec_layers', args.rec_layers)
+            args.gen_layers = getattr(ckpt_args, 'gen_layers', args.gen_layers)
+            args.units = getattr(ckpt_args, 'units', args.units)
+            args.gru_units = getattr(ckpt_args, 'gru_units', args.gru_units)
+            args.z0_encoder = getattr(ckpt_args, 'z0_encoder', args.z0_encoder)
+
+    n_covariates = test_dataset.n_covariates
+    if checkpt is not None and "state_dict" in checkpt:
+        if "encoder_z0.static_encoder.0.weight" not in checkpt["state_dict"]:
+            n_covariates = 0
+
+    model = create_LatentODE_model(args, input_dim=1, z0_prior=z0_prior, obsrv_std=obsrv_std, device=device, n_covariates=n_covariates)
     utils.get_ckpt_model(ckpt_path, model, device)
     model.eval()
     

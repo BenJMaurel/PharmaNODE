@@ -133,7 +133,7 @@ def plot_vector_field(ax, odefunc, latent_dim, device):
 	#ax.axis("off")
 
 
-def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=None, labels=None, plot_all = True, save_csv = True, patient_ids = None, args = None):
+def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=None, labels=None, plot_all = True, save_csv = True, patient_ids = None, args = None, observed_data=None, observed_times=None):
     # Create subplots: e.g., 4 rows x 7 cols (28 total)
     def to_numpy(var):
         if var is None:
@@ -148,12 +148,18 @@ def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=
         return np.array(var)
     data = to_numpy(data)
     reconstructions = to_numpy(reconstructions)
-    time_steps = to_numpy(times)
-    time_steps_to_predict = to_numpy(times_pred)
+    times = to_numpy(times)
+    times_pred = to_numpy(times_pred)
+    observed_data = to_numpy(observed_data)
+    observed_times = to_numpy(observed_times)
     auc_be = to_numpy(auc_be)
     auc_red = to_numpy(auc_red)
+    labels = to_numpy(labels)
+    patient_ids = to_numpy(patient_ids)
     
-    y_true_times = time_steps
+    if data.ndim == 2:
+        pass
+    y_true_times = times
     rec_mean = np.mean(reconstructions, axis=0)
     nbr_plot = 10
     pages = reconstructions.shape[1]//10
@@ -263,16 +269,28 @@ def plot_auc(ax, data, reconstructions, times, times_pred, auc_be=None, auc_red=
             all_predictions_list.append(pred_df)
             
             # --- Process Real Observations ---
-            obs_df = pd.DataFrame({
-                'patient_id': patient_id,
-                'time': times[i],
-                'value': data[i].squeeze(-1)
-            })
-            all_observations_list.append(obs_df)
+            # Use observed_data and observed_times for encoder input points
+            if observed_data is not None and observed_times is not None:
+                # filter out padding (where times might be 0 after the first valid point or where data is missing)
+                valid_mask = observed_data[i].squeeze(-1) > 0.0
+                if np.any(valid_mask):
+                    obs_df = pd.DataFrame({
+                        'patient_id': patient_id,
+                        'time': observed_times[valid_mask],
+                        'value': observed_data[i].squeeze(-1)[valid_mask]
+                    })
+                    all_observations_list.append(obs_df)
+            else:
+                obs_df = pd.DataFrame({
+                    'patient_id': patient_id,
+                    'time': times[i],
+                    'value': data[i].squeeze(-1)
+                })
+                all_observations_list.append(obs_df)
     
         # Combine all individual DataFrames into two final ones
         final_predictions_df = pd.concat(all_predictions_list, ignore_index=True)
-        final_observations_df = pd.concat(all_observations_list, ignore_index=True)
+        final_observations_df = pd.concat(all_observations_list, ignore_index=True) if len(all_observations_list) > 0 else pd.DataFrame(columns=['patient_id', 'time', 'value'])
     
         # Save to CSV files
         final_predictions_df.to_csv(f"./results/{args.load}/predictions.csv", index=False)

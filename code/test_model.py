@@ -47,7 +47,7 @@ parser.add_argument('--lr',  type=float, default=1e-2, help="Starting learning r
 parser.add_argument('-b', '--batch-size', type=int, default=2000)
 parser.add_argument('--viz', action='store_true', help="Show plots while training")
 
-parser.add_argument('--save', type=str, default='/results/', help="Path for save checkpoints")
+parser.add_argument('--save', type=str, default='results/', help="Path for save checkpoints")
 parser.add_argument('--experiment', type = str, default = None, help="Fix experiment number for reproducibility")
 parser.add_argument('--load', type=str, default=None, help="ID of the experiment to load for evaluation. If None, run a new experiment.")
 parser.add_argument('-r', '--random-seed', type=int, default=1991, help="Random_seed")
@@ -102,15 +102,20 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 file_name = os.path.basename(__file__)[:-3]
 utils.makedirs(args.save)
 
-#####################################################################################################
-
 if __name__ == '__main__':
 
 	experimentID = args.load
 	if experimentID is None:
 		# Make a new experiment ID
 		experimentID = int(SystemRandom().random()*100000)
-	ckpt_path = os.path.join(args.save, f"{str(experimentID)}/experiment_" + str(experimentID) + '_best.ckpt')
+	
+	if args.load is not None:
+		args.save = f"results/{args.load}/"
+		if args.experiment is None:
+			args.experiment = args.load
+	else:
+		args.save = f"results/{experimentID}/"
+	ckpt_path = os.path.join(args.save, f"experiment_{experimentID}_best.ckpt")
 
 	start = time.time()
 	print("Sampling dataset of {} training examples".format(args.n))
@@ -224,9 +229,17 @@ if __name__ == '__main__':
 			train_classif_w_reconstr = (args.dataset == "physionet")
 			).to(device)
 	elif args.latent_ode:
+		n_covariates = 3
+		if args.load is not None:
+			try:
+				ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+				if "encoder_z0.static_encoder.0.weight" not in ckpt["state_dict"]:
+					n_covariates = 0
+			except Exception as e:
+				print("Could not inspect checkpoint:", e)
 		model = create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device, 
 			classif_per_tp = classif_per_tp,
-			n_labels = n_labels)
+			n_labels = n_labels, n_covariates=n_covariates)
 	else:
 		
 		raise Exception("Model not specified")
@@ -254,8 +267,11 @@ if __name__ == '__main__':
 	all_latent_z0_var = []
 	all_latent_z0_means = []
 	all_labels = []
+	all_patient_ids = []
+	all_observed_data = []
+	all_observed_time_steps = []
 	# for itr in range(1, num_batches):
-	for itr in range(0,1):
+	for itr in range(num_batches):
 		with torch.no_grad():
 			data_dict = utils.get_next_batch(data_obj["test_dataloader"])
 			# data_dict = utils.get_next_batch(data_obj["train_dataloader"])
@@ -290,6 +306,9 @@ if __name__ == '__main__':
 			all_latent_z0_var.append(latent_z0_var.squeeze(0))
 			all_data.append(data)
 			all_reconstructions.append(reconstructions)
+			all_patient_ids.extend(patient_id)
+			all_observed_data.append(observed_data)
+			all_observed_time_steps.append(observed_time_steps)
 		original_indices = dataset.cpu().numpy().astype(int)
 		# original_indices = static[:,1].cpu().numpy().astype(int)
 		unique_values = np.unique(original_indices)
@@ -313,10 +332,12 @@ if __name__ == '__main__':
 	# reconstructions = ((reconstructions.detach()*std) + mean).numpy()
 	# data = torch.cat(all_data)
 	# reconstructions = torch.cat(all_reconstructions)	
+	# observed_data = torch.cat(all_observed_data)
 	if 'best_lambda' in data_obj['max_out'].keys():
 		data = inv_boxcox(data, data_obj['max_out']['best_lambda'][0])
 		reconstructions = inv_boxcox(reconstructions, data_obj['max_out']['best_lambda'][0])
 		reconstructions = torch.nan_to_num(reconstructions, nan=0.0)
+		observed_data = inv_boxcox(observed_data, data_obj['max_out']['best_lambda'][0])
 	reconstructions[:, static[:,1].bool(), 50:, :] = 0
 	if torch.mean(auc_red)!=0.0:
 		if len(auc_red.shape) == 1:
@@ -328,6 +349,8 @@ if __name__ == '__main__':
 	# 	auc_red = None
 	data = data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
 	reconstructions = reconstructions.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
+	observed_data = observed_data.detach().numpy()*scaling_factor[:, np.newaxis, np.newaxis]
+	observed_time_steps = observed_time_steps.detach().numpy()
 	# reconstructions = reconstructions.detach().numpy()
 	# data = data.detach().numpy()
 	# reconstructions = reconstructions.detach().numpy()
@@ -342,7 +365,7 @@ if __name__ == '__main__':
 	ax = fig.add_subplot(1, 1, 1)
 	fig, ax = plt.subplots(figsize=(10, 7))
 	# error, rmse, cat_metrics = plot_auc(ax, data, reconstructions, y_true_times, time_steps_to_predict, auc_red = auc_red, auc_be = None, labels = all_labels, patient_ids=patient_id)
-	error, rmse, cat_metrics, error_be, rmse_be, cat_be_metrics, indices_a_thresh = plot_auc(ax, data, reconstructions, y_true_times, time_steps_to_predict, auc_be = auc_be, auc_red = auc_red,labels = all_labels, patient_ids=patient_id, args = args)
+	error, rmse, cat_metrics, error_be, rmse_be, cat_be_metrics, indices_a_thresh = plot_auc(ax, data, reconstructions, y_true_times, time_steps_to_predict, auc_be = auc_be, auc_red = auc_red,labels = all_labels, patient_ids=all_patient_ids, args = args, observed_data=observed_data, observed_times=observed_time_steps)
 	
 	print(f"Error comparison:\n"
       f"  - error    = {error:.4f}")

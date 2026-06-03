@@ -376,13 +376,8 @@ class VAE_Baseline(nn.Module):
 		mask = torch.zeros(len(pred_y[1]), len(batch_dict["tp_to_predict"]), dtype=torch.float)
 		mask.scatter_(1, indices, 1.0)
 		mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
-		try:
-			pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
-		except:
-			try:
-				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
-			except:
-				pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
+		num_timepoints = batch_dict['y_true_times'].shape[1]
+		pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], num_timepoints, mask.size()[3])
 		# print("get_reconstruction done -- computing likelihood")
 		fp_mu, fp_std, fp_enc = info["first_point"]
 		fp_std = fp_std.abs().clamp(min=1e-5)
@@ -604,13 +599,8 @@ class VAE_GMM(VAE_Baseline):
         mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
         
         # Robust reshaping
-        try:
-            pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
-        except:
-            try:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
-            except:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
+        num_timepoints = batch_dict['y_true_times'].shape[1]
+        pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], num_timepoints, mask.size()[3])
 
         valid_times_mask = batch_dict['y_true_times'] != 28.1
         # ===========================================================
@@ -895,13 +885,8 @@ class VAE_GMM_V(VAE_Baseline):
         mask = torch.zeros(len(pred_y[1]), len(batch_dict["tp_to_predict"]), dtype=torch.float)
         mask.scatter_(1, indices, 1.0)
         mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
-        try:
-            pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
-        except:
-            try:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
-            except:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
+        num_timepoints = batch_dict['y_true_times'].shape[1]
+        pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], num_timepoints, mask.size()[3])
         valid_times_mask = batch_dict['y_true_times'] != 28.1
 
         rec_likelihood = self.get_gaussian_likelihood(
@@ -1133,13 +1118,8 @@ class VAE_GMM_V2(VAE_Baseline):
         mask = mask.unsqueeze(0).unsqueeze(-1).expand(pred_y.shape[0],-1,-1,-1)
         
         # Robust reshaping
-        try:
-            pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 12, mask.size()[3])
-        except:
-            try:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 11, mask.size()[3])
-            except:
-                pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], 10, mask.size()[3])
+        num_timepoints = batch_dict['y_true_times'].shape[1]
+        pred_y = pred_y[mask.bool()].view(mask.size()[0], mask.size()[1], num_timepoints, mask.size()[3])
 
         valid_times_mask = batch_dict['y_true_times'] != 28.1
         # ===========================================================

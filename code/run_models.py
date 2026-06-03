@@ -38,9 +38,8 @@ parser = argparse.ArgumentParser('Latent ODE')
 parser.add_argument('-n',  type=int, default=100, help="Size of the dataset")
 parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr',  type=float, default=1e-2, help="Starting learning rate.")
-parser.add_argument('-b', '--batch-size', type=int, default=1)
+parser.add_argument('-b', '--batch-size', type=int, default=512)
 parser.add_argument('--viz', action='store_true', help="Show plots while training")
-
 parser.add_argument('--save', type=str, default='./results/', help="Path for save checkpoints")
 parser.add_argument('--load', type=str, default=None, help="ID of the experiment to load for evaluation. If None, run a new experiment.")
 parser.add_argument('-r', '--random-seed', type=int, default=1991, help="Random_seed")
@@ -546,3 +545,27 @@ if best_smoothed_test_mse != float('inf'):
     print(f"Best model (based on smoothed MSE) saved to {best_ckpt_path} with smoothed Test MSE: {best_smoothed_test_mse:.4f}")
 else:
     print("Training finished, but no 'best' model was saved as MSE was not tracked or training ended early.")
+
+print("Running evaluation to generate predictions and latent space plots...")
+import subprocess
+try:
+    test_cmd = [
+        "python3", "test_model.py", 
+        "--load", str(experimentID), 
+        "--dataset", str(args.dataset), 
+        "-n", str(args.n),
+    ]
+    if args.latent_ode:
+        test_cmd.append("--latent-ode")
+    elif args.ode_rnn:
+        test_cmd.append("--ode-rnn")
+    elif args.classic_rnn:
+        test_cmd.append("--classic-rnn")
+    
+    if args.dataset in ['PK_Tacro', 'PK_MMF']:
+        test_cmd.extend(["-s", "40", "-l", "10", "--noise-weight", "0.01", "--max-t", "5."])
+        
+    print("Calling:", " ".join(test_cmd))
+    subprocess.run(test_cmd, check=True)
+except Exception as e:
+    print("Evaluation failed:", e)
