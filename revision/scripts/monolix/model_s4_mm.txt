@@ -1,0 +1,24 @@
+DESCRIPTION: Scenario-4 tacrolimus model, the TRUE structure of gen_tacro_film.py (scenario >= 3):
+three transit compartments, two-compartment disposition, Michaelis-Menten elimination from the
+central compartment.  CL is not a parameter: it never enters the scenario-3/4 ODE.
+Units: dose mg, volumes L, Vmax mg/h, Km mg/L; output CONC in ng/mL.
+
+[LONGITUDINAL]
+input = {Ktr, Vc, Q, Vp, Vmax, Km}
+
+PK:
+depot(target = DEPOT)
+
+EQUATION:
+odeType = stiff
+Cc = CENT/Vc
+ddt_DEPOT  = -Ktr*DEPOT
+ddt_TRANS1 =  Ktr*DEPOT  - Ktr*TRANS1
+ddt_TRANS2 =  Ktr*TRANS1 - Ktr*TRANS2
+ddt_TRANS3 =  Ktr*TRANS2 - Ktr*TRANS3
+ddt_CENT   =  Ktr*TRANS3 - Vmax*Cc/(Km + Cc) - Q/Vc*CENT + Q/Vp*PERI
+ddt_PERI   =  Q/Vc*CENT - Q/Vp*PERI
+CONC = 1000*Cc
+
+OUTPUT:
+output = CONC

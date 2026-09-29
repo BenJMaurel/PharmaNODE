@@ -1,6 +1,6 @@
 # 💊 PharmaNODE 
 
-👋 **Welcome PAGE Conference Attendees!** Thank you for stopping by our poster. 
+👋 **Welcome ISCB–GMDS 2026 attendees!** Thank you for coming to the talk *"Latent Neural-ODEs for precision dosing from sparse data"* (Freiburg im Breisgau). The code for the work presented is in [`revision/`](revision/) (see [What's new since the paper](#-whats-new-since-the-paper-iscbgmds-2026) below). The repository as shown at PAGE 2026 is tagged [`page-2026`](../../tree/page-2026).
 
 ## 🚀 Live Interactive Demo
 
@@ -9,6 +9,26 @@ Want to see PharmaNODE in action right now? We have set up a live interactive we
 👉 **[Click here to launch the PharmaNODE Live Demo](https://ba86e6bad356ea0fa9.gradio.live)** 👈
 
 *(Note: No installation or coding required—just click the link and start experimenting!)*
+
+---
+
+## 🆕 What's new since the paper (ISCB–GMDS 2026)
+
+The talk makes two claims. Each points to the code that tests it.
+
+1. **Prediction without structural specification.** A latent ODE estimates individual tacrolimus exposure from a few
+   samples without pre-specifying a compartmental model. The published pipeline is in [`code/`](code/). The extended
+   comparison against MAP-BE (three misspecification scenarios, 100 simulated datasets each, several Monolix
+   initialisations and residual-error settings) is in [`revision/scripts/scen_rerun/`](revision/scripts/scen_rerun/).
+2. **Counterfactual dosing: where the dose enters matters.** The same framework predicts a patient's exposure under a
+   dose they never received. We compare three ways of injecting the dose: an **autonomous vector field** with the dose
+   acting as an affine displacement of the initial latent state (OT-FiLM, ours), a **dose-conditioned vector field**,
+   and the **two-port neural-PK model of Lu et al. (2021)**. We test them on a simulated benchmark with saturable
+   elimination and in designed confounding experiments where the dose is correlated with unobserved physiology.
+   Code in [`revision/`](revision/): simulators, the three designs, evaluation, and one script per experiment.
+
+[`revision/README.md`](revision/README.md) explains how to run each experiment and lists the pitfalls that silently
+produce wrong numbers. No data, checkpoints or results are included; every cohort is simulated by the scripts.
 
 ---
 

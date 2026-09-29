@@ -1,0 +1,24 @@
+DESCRIPTION: Scenario-4 tacrolimus model with LINEAR elimination -- the candidate a pharmacometrician
+would compare against Michaelis-Menten (model_s4_mm.txt) in the hidden-saturation experiment (handoff 11).
+Three transit compartments, two-compartment disposition, first-order elimination CL from the central
+compartment.  Units: dose mg, volumes L, CL and Q L/h; output CONC in ng/mL.
+
+[LONGITUDINAL]
+input = {Ktr, Vc, Q, Vp, CL}
+
+PK:
+depot(target = DEPOT)
+
+EQUATION:
+odeType = stiff
+Cc = CENT/Vc
+ddt_DEPOT  = -Ktr*DEPOT
+ddt_TRANS1 =  Ktr*DEPOT  - Ktr*TRANS1
+ddt_TRANS2 =  Ktr*TRANS1 - Ktr*TRANS2
+ddt_TRANS3 =  Ktr*TRANS2 - Ktr*TRANS3
+ddt_CENT   =  Ktr*TRANS3 - CL*Cc - Q/Vc*CENT + Q/Vp*PERI
+ddt_PERI   =  Q/Vc*CENT - Q/Vp*PERI
+CONC = 1000*Cc
+
+OUTPUT:
+output = CONC
